@@ -84,5 +84,3 @@ results_df = pd.DataFrame(results)
 st.dataframe(results_df)
 
 st.line_chart(results_df[["Floating Payment", "Fixed Payment"]].set_index(results_df["Period"]))
-
-st.write("👉 In practice, this structure shows how a user paying floating could swap into fixed by exchanging cashflows.")
