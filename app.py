@@ -1,12 +1,16 @@
+import streamlit as st
 import requests
 import pandas as pd
-import numpy as np
-import streamlit as st
-import matplotlib.pyplot as plt
 
-# -------------------------------
-# Step 1: Fetch data from The Graph
-# -------------------------------
+# --------------------------
+# 1. Page setup
+# --------------------------
+st.title("Compound APR Viewer & Fixed Rate Swap Idea")
+st.write("This tool shows historical Supply & Borrow APRs from Compound, and explains how swaps could work.")
+
+# --------------------------
+# 2. Fetch data from The Graph
+# --------------------------
 api_key = "3b6cc500833cb7c07f3eb2e97bc88709"
 url = f"https://gateway.thegraph.com/api/{api_key}/subgraphs/id/5nwMCSHaTqG3Kd2gHznbTXEnZ9QNWsssQfbHhDqQSQFp"
 
@@ -14,10 +18,7 @@ headers = {"Content-Type": "application/json"}
 
 query = """
 {
-  markets {
-    id
-  }
-  dailyMarketAccountings(first: 1000, where: { market: "0xc3d688B66703497DAA19211EEdff47f25384cdc3" }) {
+  dailyMarketAccountings(first: 100, where: { market: "0xc3d688B66703497DAA19211EEdff47f25384cdc3" }) {
     timestamp
     accounting {
       borrowApr
@@ -30,68 +31,58 @@ query = """
 response = requests.post(url, json={"query": query}, headers=headers)
 data = response.json()
 
+# Convert to DataFrame
 df = pd.DataFrame({
     "timestamp": [entry["timestamp"] for entry in data["data"]["dailyMarketAccountings"]],
-    "borrowApr": [entry["accounting"]["borrowApr"] for entry in data["data"]["dailyMarketAccountings"]],
-    "supplyApr": [entry["accounting"]["supplyApr"] for entry in data["data"]["dailyMarketAccountings"]],
+    "borrowApr": [float(entry["accounting"]["borrowApr"]) for entry in data["data"]["dailyMarketAccountings"]],
+    "supplyApr": [float(entry["accounting"]["supplyApr"]) for entry in data["data"]["dailyMarketAccountings"]]
 })
 
-# Convert numeric values
-df["borrowApr"] = df["borrowApr"].astype(float)
-df["supplyApr"] = df["supplyApr"].astype(float)
+# Convert timestamp to readable date
 df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
+df = df.sort_values("timestamp")
 
-# -------------------------------
-# Step 2: Streamlit UI
-# -------------------------------
-st.title("💹 Compound Swap Simulator")
-st.markdown("Simulate a **fixed vs floating interest rate swap** using Compound APR data.")
+# --------------------------
+# 3. Show data
+# --------------------------
+st.subheader("📊 Historical APR Data")
+st.write("Borrow and Supply APRs over time:")
 
-# Show recent APR data
-st.subheader("Latest APRs")
+st.line_chart(df.set_index("timestamp")[["borrowApr", "supplyApr"]])
+
+st.write("Raw data preview:")
 st.dataframe(df.tail(10))
 
-# -------------------------------
-# Step 3: User Inputs
-# -------------------------------
-st.subheader("Swap Simulation")
-amount = st.number_input("Enter amount ($):", min_value=100, step=100, value=1000)
-duration_days = st.number_input("Enter duration (days):", min_value=1, max_value=365, value=30)
+# --------------------------
+# 4. Fixed Swap Simulator (conceptual)
+# --------------------------
+st.subheader("💡 Fixed Rate Swap Simulator (Concept)")
 
-# -------------------------------
-# Step 4: Swap Calculation
-# -------------------------------
-def calculate_swap(amount, duration_days, df):
-    # Fixed = average APR (borrow side) over history
-    fixed_rate = df["borrowApr"].mean()
+notional = st.number_input("Notional Amount (in ETH)", min_value=1, value=100)
+fixed_rate = st.number_input("Fixed Rate (as %)", min_value=0.0, value=5.0, step=0.1)
+periods = st.slider("Number of Periods", 1, 12, 6)
 
-    # Floating = simulate using recent data
-    recent = df.tail(duration_days) if duration_days < len(df) else df
-    floating_growth = np.prod([1 + r/100/365 for r in recent["borrowApr"]])
+# Example: simple fixed vs floating cashflow calculation
+floating_rates = df["borrowApr"].tail(periods).values
+fixed_payment = notional * (fixed_rate / 100)
 
-    floating_cost = amount * (floating_growth - 1)
-    fixed_cost = amount * (fixed_rate/100) * (duration_days/365)
+st.write(f"Fixed Payment per period: **{fixed_payment:.2f} ETH**")
 
-    return fixed_rate, fixed_cost, floating_cost
+results = []
+for i in range(periods):
+    floating_payment = notional * (floating_rates[i] / 100)
+    net_cashflow = fixed_payment - floating_payment
+    results.append({
+        "Period": i + 1,
+        "Floating Rate": floating_rates[i],
+        "Floating Payment": floating_payment,
+        "Fixed Payment": fixed_payment,
+        "Net Cashflow": net_cashflow
+    })
 
-# Run calculation when button pressed
-if st.button("Simulate Swap"):
-    fixed_rate, fixed_cost, floating_cost = calculate_swap(amount, duration_days, df)
+results_df = pd.DataFrame(results)
+st.dataframe(results_df)
 
-    st.write(f"**Fixed Rate (annual): {fixed_rate:.2f}%**")
-    st.write(f"**Cost at Fixed Rate: ${fixed_cost:.2f}**")
-    st.write(f"**Cost at Floating Rate: ${floating_cost:.2f}**")
+st.line_chart(results_df[["Floating Payment", "Fixed Payment"]].set_index(results_df["Period"]))
 
-    if fixed_cost < floating_cost:
-        st.success("✅ Fixed rate is cheaper in this scenario.")
-    else:
-        st.warning("⚠️ Floating rate is cheaper in this scenario.")
-
-    # Plot APR history
-    st.subheader("APR Trend (last 90 days)")
-    fig, ax = plt.subplots()
-    ax.plot(df["timestamp"].tail(90), df["borrowApr"].tail(90), label="Floating APR")
-    ax.axhline(y=fixed_rate, color='r', linestyle='--', label="Fixed Rate")
-    ax.set_ylabel("APR (%)")
-    ax.legend()
-    st.pyplot(fig)
+st.write("👉 In practice, this structure shows how a user paying floating could swap into fixed by exchanging cashflows.")
