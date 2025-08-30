@@ -70,7 +70,7 @@ st.write(f"Fixed Payment per period: **{fixed_payment:.2f} ETH**")
 
 results = []
 for i in range(periods):
-    floating_payment = notional * (floating_rates[i] / 100)
+    floating_payment = notional * (floating_rates[i])
     net_cashflow = fixed_payment - floating_payment
     results.append({
         "Period": i + 1,
