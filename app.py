@@ -2,34 +2,35 @@ import streamlit as st
 import requests
 import pandas as pd
 
-# --------------
-# Page setup
-# --------------
-st.title("Compound Fixed Rate Swap Simulator (Automated ETH Price)")
-st.write("ETH USD price is fetched automatically — no user input needed.")
+# --------------------------
+# 1. Page setup
+# --------------------------
+st.title("📈 Compound Fixed Rate Swap Simulator")
+st.write("This app shows historical APRs and simulates a simple fixed vs floating rate swap using ETH as collateral.")
 
-# --------------
-# Collateral Factors (hardcoded)
-# --------------
-BORROW_CF = 0.825
-LIQ_CF = 0.88
-LIQ_PENALTY = 0.07
+# --------------------------
+# 2. Collateral Factors (hardcoded)
+# --------------------------
+BORROW_COLLATERAL_FACTOR = 0.825   # 82.5%
+LIQUIDATE_COLLATERAL_FACTOR = 0.88 # 88.0%
+LIQUIDATION_PENALTY = 0.07         # 7.0%
 
-st.sidebar.header("Collateral Parameters")
-st.sidebar.write(f"Borrow CF: {BORROW_CF*100:.2f}%")
-st.sidebar.write(f"Liquidate CF: {LIQ_CF*100:.2f}%")
-st.sidebar.write(f"Liquidation Penalty: {LIQ_PENALTY*100:.2f}%")
+st.sidebar.subheader("⚖️ Collateral Parameters")
+st.sidebar.write(f"Borrow Collateral Factor: {BORROW_COLLATERAL_FACTOR*100:.2f}%")
+st.sidebar.write(f"Liquidate Collateral Factor: {LIQUIDATE_COLLATERAL_FACTOR*100:.2f}%")
+st.sidebar.write(f"Liquidation Penalty: {LIQUIDATION_PENALTY*100:.2f}%")
 
-# --------------
-# The Graph endpoint + GraphQL queries
-# --------------
-API_KEY = "3b6cc500833cb7c07f3eb2e97bc88709"
-GRAPH_URL = f"https://gateway.thegraph.com/api/{API_KEY}/subgraphs/id/5nwMCSHaTqG3Kd2gHznbTXEnZ9QNWsssQfbHhDqQSQFp"
-HEADERS = {"Content-Type": "application/json"}
+# --------------------------
+# 3. Fetch APR data from The Graph
+# --------------------------
+api_key = "3b6cc500833cb7c07f3eb2e97bc88709"
+url = f"https://gateway.thegraph.com/api/{api_key}/subgraphs/id/5nwMCSHaTqG3Kd2gHznbTXEnZ9QNWsssQfbHhDqQSQFp"
 
-apr_query = """
+headers = {"Content-Type": "application/json"}
+
+query = """
 {
-  dailyMarketAccountings(first: 200, where: { market: "0xc3d688b66703497daa19211eedff47f25384cdc3" }) {
+  dailyMarketAccountings(first: 100, where: { market: "0xc3d688B66703497DAA19211EEdff47f25384cdc3" }) {
     timestamp
     accounting {
       borrowApr
@@ -38,60 +39,63 @@ apr_query = """
   }
 }
 """
-apr_resp = requests.post(GRAPH_URL, json={"query": apr_query}, headers=HEADERS).json()
+
+response = requests.post(url, json={"query": query}, headers=headers)
+data = response.json()
+
+# Convert to DataFrame
 df = pd.DataFrame({
-    "timestamp": [x["timestamp"] for x in apr_resp["data"]["dailyMarketAccountings"]],
-    "borrowApr": [float(x["accounting"]["borrowApr"]) for x in apr_resp["data"]["dailyMarketAccountings"]],
-    "supplyApr": [float(x["accounting"]["supplyApr"]) for x in apr_resp["data"]["dailyMarketAccountings"]]
+    "timestamp": [entry["timestamp"] for entry in data["data"]["dailyMarketAccountings"]],
+    "borrowApr": [float(entry["accounting"]["borrowApr"]) for entry in data["data"]["dailyMarketAccountings"]],
+    "supplyApr": [float(entry["accounting"]["supplyApr"]) for entry in data["data"]["dailyMarketAccountings"]]
 })
+
+# Convert timestamp to readable date
 df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
 df = df.sort_values("timestamp")
 
-price_query = """
-{
-  bundle(id: "1") {
-    ethPrice
-  }
-}
-"""
-price = requests.post(GRAPH_URL, json={"query": price_query}, headers=HEADERS).json()
-eth_price = float(price["data"]["bundle"]["ethPrice"])
-st.write(f"**Current ETH Price (USD):** ${eth_price:,.2f}")
-
-# --------------
-# Display APR data
-# --------------
-st.subheader("Historical APRs")
+# --------------------------
+# 4. Show data
+# --------------------------
+st.subheader("📊 Historical APR Data")
 st.line_chart(df.set_index("timestamp")[["borrowApr", "supplyApr"]])
-st.dataframe(df.tail(5))
 
-# --------------
-# Swap simulator
-# --------------
-st.subheader("Fixed vs Floating Swap")
+st.write("Raw data preview:")
+st.dataframe(df.tail(10))
 
-eth_collateral = st.number_input("ETH Collateral", min_value=0.1, value=10.0, step=0.1)
-fixed_rate = st.number_input("Fixed Rate (%)", min_value=0.0, value=5.0, step=0.1)
-periods = st.slider("Number of Periods", min_value=1, max_value=12, value=6)
+# --------------------------
+# 5. Fixed Rate Swap Simulator
+# --------------------------
+st.subheader("💡 Fixed Rate Swap Simulator")
 
-borrow_usd = eth_collateral * eth_price * BORROW_CF
-st.write(f"Max borrowable: **${borrow_usd:,.2f}**")
+# User inputs
+eth_price = st.number_input("ETH Price (USD)", min_value=500, value=2000, step=50)
+eth_deposit = st.number_input("ETH Deposited as Collateral", min_value=0.1, value=10.0)
+fixed_rate = st.number_input("Fixed Rate (as %)", min_value=0.0, value=5.0, step=0.1)
+periods = st.slider("Number of Periods", 1, 12, 6)
 
-fixed_payment = borrow_usd * (fixed_rate / 100)
+# Max borrow based on collateral factor
+max_borrow_usd = eth_deposit * eth_price * BORROW_COLLATERAL_FACTOR
+st.write(f"💰 With {eth_deposit} ETH, you can safely borrow up to **${max_borrow_usd:,.2f}**")
+
+# Swap calculation
+notional = max_borrow_usd / eth_price  # borrow notional in ETH terms
 floating_rates = df["borrowApr"].tail(periods).values
+fixed_payment = notional * (fixed_rate / 100)
 
 results = []
 for i in range(periods):
-    float_pay = borrow_usd * floating_rates[i]
-    net = fixed_payment - float_pay
+    floating_payment = notional * (floating_rates[i])
+    net_cashflow = fixed_payment - floating_payment
     results.append({
         "Period": i + 1,
-        "Floating Rate": f"{floating_rates[i]*100:.2f}%",
-        "Float Payment (USD)": f"${float_pay:,.2f}",
-        "Fixed Payment (USD)": f"${fixed_payment:,.2f}",
-        "Net Cashflow (USD)": f"${net:,.2f}"
+        "Floating Rate": floating_rates[i],
+        "Floating Payment (ETH)": floating_payment,
+        "Fixed Payment (ETH)": fixed_payment,
+        "Net Cashflow (ETH)": net_cashflow
     })
 
-res_df = pd.DataFrame(results)
-st.dataframe(res_df.set_index("Period"))
-st.line_chart(res_df.set_index("Period")[["Floating Payment (USD)", "Fixed Payment (USD)"]])
+results_df = pd.DataFrame(results)
+
+st.dataframe(results_df)
+st.line_chart(results_df[["Floating Payment (ETH)", "Fixed Payment (ETH)"]].set_index(results_df["Period"]))
