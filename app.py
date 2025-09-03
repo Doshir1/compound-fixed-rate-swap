@@ -68,9 +68,7 @@ df = pd.DataFrame(  {"timestamp": [entry["timestamp"] for entry in data["data"][
     "borrowApr": [entry["accounting"]["borrowApr"] for entry in data["data"]["dailyMarketAccountings"]],
     "supplyApr": [entry["accounting"]["supplyApr"] for entry in data["data"]["dailyMarketAccountings"]]})
 
-# Save the DataFrame to a CSV file
-df = df.sort_values(by="timestamp", ascending=False)
-df.to_csv('../csv_files/compound_rates_daily.csv', index=False)
+
 
 # Output the DataFrame to verify
 print(df)
