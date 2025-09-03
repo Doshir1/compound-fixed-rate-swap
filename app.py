@@ -70,15 +70,9 @@ df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
 df = df.sort_values("timestamp")
 
 # --------------------------
-# 4b. Convert APR % to decimal and calculate per-second rate
+# 4b. Convert borrow APR to per-second rate
 # --------------------------
 SECONDS_PER_YEAR = 365 * 24 * 60 * 60
-
-# Most APIs return APR in percent, so divide by 100
-df["borrowApr"] = df["borrowApr"] / 100
-df["supplyApr"] = df["supplyApr"] / 100
-
-# Convert to per-second rates
 df["borrow_rate_per_second"] = (1 + df["borrowApr"]) ** (1 / SECONDS_PER_YEAR) - 1
 
 # --------------------------
@@ -110,7 +104,7 @@ st.subheader("💡 Suggested Fixed Rate (Backtest)")
 
 floating_aprs_per_sec = df["borrow_rate_per_second"].tail(periods).values
 
-def suggest_fixed_rate(floating_rates_per_sec, margin=1e-8):
+def suggest_fixed_rate(floating_rates_per_sec, margin=1e-6):
     """
     Suggest the lowest fixed rate slightly above historical floating rates.
     """
@@ -123,19 +117,17 @@ suggested_fixed_rate_annual = (1 + suggested_fixed_rate_per_sec) ** SECONDS_PER_
 st.write(f"📈 Suggested Fixed Rate (annual %): {suggested_fixed_rate_annual*100:.2f}%")
 
 # --------------------------
-# 8. Cashflow Simulation using suggested fixed rate
+# 8. Cashflow Simulation
 # --------------------------
 fixed_payment = max_borrow_usd * (suggested_fixed_rate_annual) / 12
 
 results = []
-floating_aprs = df["borrowApr"].tail(periods).values
-
 for i in range(periods):
-    floating_payment = max_borrow_usd * floating_aprs[i] / 12
+    floating_payment = max_borrow_usd * df["borrowApr"].tail(periods).values[i] / 12
     net_cashflow = fixed_payment - floating_payment
     results.append({
         "Period": i + 1,
-        "Floating Rate": f"{floating_aprs[i]*100:.2f}%",
+        "Floating Rate": f"{df['borrowApr'].tail(periods).values[i]*100:.2f}%",
         "Floating Payment": floating_payment,
         "Fixed Payment": fixed_payment,
         "Net Cashflow": net_cashflow
