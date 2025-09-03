@@ -10,7 +10,7 @@ st.write("This app shows Compound APR data, fetches ETH price from Polygon.io, "
          "and simulates a simple fixed–floating swap using ETH as collateral.")
 
 # --------------------------
-# 2. Collateral Factors (from Compound v3)
+# 2. Collateral Factors
 # --------------------------
 BORROW_CF = 0.825   # 82.5%
 LIQUIDATE_CF = 0.88 # 88.0%
@@ -21,7 +21,7 @@ LIQ_PENALTY = 0.07  # 7%
 # --------------------------
 API_KEY_POLYGON = "on0FmvftNux2r3sVEmDVr4mR6n9e0ZCc"
 
-@st.cache_data(ttl=300)  # cache for 5 min
+@st.cache_data(ttl=300)
 def get_eth_price_usd():
     url = f"https://api.polygon.io/v2/aggs/ticker/X:ETHUSD/prev?apiKey={API_KEY_POLYGON}"
     r = requests.get(url, timeout=10)
@@ -33,7 +33,7 @@ eth_price = None
 try:
     eth_price = get_eth_price_usd()
     st.success(f"💰 Current ETH Price (USD): ${eth_price:,.2f}")
-except Exception as e:
+except Exception:
     st.error("Failed to fetch ETH price from Polygon.io.")
     eth_price = st.number_input("Enter ETH Price manually (USD)", min_value=500.0, value=2000.0, step=10.0)
 
@@ -69,12 +69,15 @@ df = pd.DataFrame({
 df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
 df = df.sort_values("timestamp")
 
+# Keep only the 10 most recent APRs
+df_recent = df.tail(10)
+
 # --------------------------
-# 5. Show Historical APRs
+# 5. Show Recent APRs
 # --------------------------
-st.subheader("📊 Historical APR Data")
-st.line_chart(df.set_index("timestamp")[["borrowApr", "supplyApr"]])
-st.dataframe(df.tail(10))
+st.subheader("📊 Most Recent APR Data (Last 10 Entries)")
+st.line_chart(df_recent.set_index("timestamp")[["borrowApr", "supplyApr"]])
+st.dataframe(df_recent)
 
 # --------------------------
 # 6. Swap Simulator
@@ -85,11 +88,10 @@ eth_collateral = st.number_input("Deposit ETH as Collateral", min_value=1.0, val
 periods = st.slider("Number of Periods (months)", 1, 12, 6)
 
 # --------------------------
-# 6a. Backtest to automatically set fixed rate
+# 6a. Automatically set fixed rate based on backtest
 # --------------------------
-# Take the max borrow APR of the last N periods and add a small margin
-historical_borrow_aprs = df["borrowApr"].tail(periods).values
-margin = 0.001  # 0.1% to ensure fixed > borrow
+historical_borrow_aprs = df_recent["borrowApr"].tail(periods).values
+margin = 0.001  # ensure fixed > borrow
 fixed_rate = max(historical_borrow_aprs) + margin
 st.write(f"📈 Automatically suggested Fixed Rate (annual %): {fixed_rate*100:.2f}%")
 
@@ -105,7 +107,7 @@ st.write(f"📉 Max Borrow Capacity (using {BORROW_CF*100:.1f}% factor): ${max_b
 # --------------------------
 # Cashflows
 # --------------------------
-floating_rates = df["borrowApr"].tail(periods).values
+floating_rates = df_recent["borrowApr"].tail(periods).values
 fixed_payment = max_borrow_usd * fixed_rate / 12  # monthly fixed
 
 results = []
