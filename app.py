@@ -4,7 +4,7 @@ import requests
 import pandas as pd
 import streamlit as st
 from web3 import Web3
-
+!pip install web3
 # =========================
 # 0) Page Setup
 # =========================
