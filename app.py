@@ -49,7 +49,7 @@ query = """
   markets{
     id
   }
-    dailyMarketAccountings(first: 100, where: { market: "0xc3d688B66703497DAA19211EEdff47f25384cdc3" }) {
+    dailyMarketAccountings(first: 10, where: { market: "0xc3d688B66703497DAA19211EEdff47f25384cdc3" }) {
     timestamp
     accounting {
       borrowApr
