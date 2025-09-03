@@ -46,10 +46,7 @@ headers = {"Content-Type": "application/json"}
 
 query = """
 {
-  markets{
-    id
-  }
-    dailyMarketAccountings(first: 10, where: { market: "0xc3d688B66703497DAA19211EEdff47f25384cdc3" }) {
+  dailyMarketAccountings(first: 100, where: { market: "0xc3d688B66703497DAA19211EEdff47f25384cdc3" }) {
     timestamp
     accounting {
       borrowApr
@@ -59,19 +56,18 @@ query = """
 }
 """
 
-# Make the request
-response = requests.post(url, json={"query": query, "operationName": "Subgraphs", "variables": {}}, headers=headers)
-
+response = requests.post(url, json={"query": query}, headers=headers)
 data = response.json()
-# Create a Pandas DataFrame
-df = pd.DataFrame(  {"timestamp": [entry["timestamp"] for entry in data["data"]["dailyMarketAccountings"]],
-    "borrowApr": [entry["accounting"]["borrowApr"] for entry in data["data"]["dailyMarketAccountings"]],
-    "supplyApr": [entry["accounting"]["supplyApr"] for entry in data["data"]["dailyMarketAccountings"]]})
 
+# Convert to DataFrame
+df = pd.DataFrame({
+    "timestamp": [entry["timestamp"] for entry in data["data"]["dailyMarketAccountings"]],
+    "borrowApr": [float(entry["accounting"]["borrowApr"]) for entry in data["data"]["dailyMarketAccountings"]],
+    "supplyApr": [float(entry["accounting"]["supplyApr"]) for entry in data["data"]["dailyMarketAccountings"]]
+})
 
-
-# Output the DataFrame to verify
-print(df)
+df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
+df = df.sort_values("timestamp")
 
 # --------------------------
 # 5. Show Historical APRs
