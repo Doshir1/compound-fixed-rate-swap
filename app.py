@@ -38,7 +38,7 @@ except Exception:
     eth_price = st.number_input("Enter ETH Price manually (USD)", min_value=500.0, value=2000.0, step=10.0)
 
 # --------------------------
-# 4. Fetch APR Data from The Graph
+# 4. Fetch APR Data from The Graph (latest 100 entries)
 # --------------------------
 api_key = "3b6cc500833cb7c07f3eb2e97bc88709"
 url = f"https://gateway.thegraph.com/api/{api_key}/subgraphs/id/5nwMCSHaTqG3Kd2gHznbTXEnZ9QNWsssQfbHhDqQSQFp"
@@ -46,7 +46,12 @@ headers = {"Content-Type": "application/json"}
 
 query = """
 {
-  dailyMarketAccountings(first: 100, where: { market: "0xc3d688B66703497DAA19211EEdff47f25384cdc3" }) {
+  dailyMarketAccountings(
+    first: 100,
+    where: { market: "0xc3d688B66703497DAA19211EEdff47f25384cdc3" },
+    orderBy: timestamp,
+    orderDirection: desc
+  ) {
     timestamp
     accounting {
       borrowApr
@@ -67,7 +72,7 @@ df = pd.DataFrame({
 })
 
 df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
-df = df.sort_values("timestamp")
+df = df.sort_values("timestamp")  # Oldest → newest
 
 # Keep only the 10 most recent APRs
 df_recent = df.tail(10)
@@ -88,7 +93,7 @@ eth_collateral = st.number_input("Deposit ETH as Collateral", min_value=1.0, val
 periods = st.slider("Number of Periods (months)", 1, 12, 6)
 
 # --------------------------
-# 6a. Automatically set fixed rate based on backtest
+# 6a. Automatically set fixed rate based on recent APRs
 # --------------------------
 historical_borrow_aprs = df_recent["borrowApr"].tail(periods).values
 margin = 0.001  # ensure fixed > borrow
