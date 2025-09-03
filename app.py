@@ -120,4 +120,25 @@ for i in range(periods):
     net_cashflow = fixed_payment - floating_payment
     results.append({
         "Period": i + 1,
-        "Floating Rate": f"{}
+        "Floating Rate": f"{floating_rates[i]*100:.2f}%",
+        "Floating Payment": floating_payment,
+        "Fixed Payment": fixed_payment,
+        "Net Cashflow": net_cashflow
+    })
+
+results_df = pd.DataFrame(results)
+st.dataframe(results_df)
+st.line_chart(results_df.set_index("Period")[["Floating Payment", "Fixed Payment"]])
+
+# --------------------------
+# 7. Liquidation Check
+# --------------------------
+st.subheader("⚠️ Liquidation Risk Check")
+
+liquidation_threshold = collateral_value_usd * LIQUIDATE_CF
+st.write(f"Liquidation Threshold (at {LIQUIDATE_CF*100:.1f}%): ${liquidation_threshold:,.2f}")
+
+if max_borrow_usd > liquidation_threshold:
+    st.error("❌ Position exceeds liquidation threshold! Risk of liquidation.")
+else:
+    st.success("✅ Position is safe under current collateral factors.")
