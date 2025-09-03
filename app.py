@@ -85,19 +85,13 @@ eth_collateral = st.number_input("Deposit ETH as Collateral", min_value=1.0, val
 periods = st.slider("Number of Periods (months)", 1, 12, 6)
 
 # --------------------------
-# 6a. Backtest to suggest fixed rate
+# 6a. Backtest to automatically set fixed rate
 # --------------------------
-# Take the max borrow APR of the last N periods as the suggested fixed rate
+# Take the max borrow APR of the last N periods and add a small margin
 historical_borrow_aprs = df["borrowApr"].tail(periods).values
-suggested_fixed_rate = max(historical_borrow_aprs)
-
-# Display suggested fixed rate in input box
-fixed_rate = st.number_input(
-    "Fixed Rate (annual %)", 
-    min_value=0.0, 
-    value=suggested_fixed_rate*100, 
-    step=0.1
-)
+margin = 0.001  # 0.1% to ensure fixed > borrow
+fixed_rate = max(historical_borrow_aprs) + margin
+st.write(f"📈 Automatically suggested Fixed Rate (annual %): {fixed_rate*100:.2f}%")
 
 # --------------------------
 # Borrow capacity (USD)
@@ -112,7 +106,7 @@ st.write(f"📉 Max Borrow Capacity (using {BORROW_CF*100:.1f}% factor): ${max_b
 # Cashflows
 # --------------------------
 floating_rates = df["borrowApr"].tail(periods).values
-fixed_payment = max_borrow_usd * (fixed_rate / 100) / 12  # monthly fixed
+fixed_payment = max_borrow_usd * fixed_rate / 12  # monthly fixed
 
 results = []
 for i in range(periods):
