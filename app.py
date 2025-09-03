@@ -120,4 +120,4 @@ for i in range(periods):
     net_cashflow = fixed_payment - floating_payment
     results.append({
         "Period": i + 1,
-        "Floating Rate": f"{
+        "Floating Rate": f"{}
