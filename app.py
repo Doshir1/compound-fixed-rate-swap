@@ -46,7 +46,10 @@ headers = {"Content-Type": "application/json"}
 
 query = """
 {
-  dailyMarketAccountings(first: 100, where: { market: "0xc3d688B66703497DAA19211EEdff47f25384cdc3" }) {
+  markets{
+    id
+  }
+    dailyMarketAccountings(first: 100, where: { market: "0xc3d688B66703497DAA19211EEdff47f25384cdc3" }) {
     timestamp
     accounting {
       borrowApr
@@ -56,18 +59,21 @@ query = """
 }
 """
 
-response = requests.post(url, json={"query": query}, headers=headers)
+# Make the request
+response = requests.post(url, json={"query": query, "operationName": "Subgraphs", "variables": {}}, headers=headers)
+
 data = response.json()
+# Create a Pandas DataFrame
+df = pd.DataFrame(  {"timestamp": [entry["timestamp"] for entry in data["data"]["dailyMarketAccountings"]],
+    "borrowApr": [entry["accounting"]["borrowApr"] for entry in data["data"]["dailyMarketAccountings"]],
+    "supplyApr": [entry["accounting"]["supplyApr"] for entry in data["data"]["dailyMarketAccountings"]]})
 
-# Convert to DataFrame
-df = pd.DataFrame({
-    "timestamp": [entry["timestamp"] for entry in data["data"]["dailyMarketAccountings"]],
-    "borrowApr": [float(entry["accounting"]["borrowApr"]) for entry in data["data"]["dailyMarketAccountings"]],
-    "supplyApr": [float(entry["accounting"]["supplyApr"]) for entry in data["data"]["dailyMarketAccountings"]]
-})
+# Save the DataFrame to a CSV file
+df = df.sort_values(by="timestamp", ascending=False)
+df.to_csv('../csv_files/compound_rates_daily.csv', index=False)
 
-df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
-df = df.sort_values("timestamp")
+# Output the DataFrame to verify
+print(df)
 
 # --------------------------
 # 5. Show Historical APRs
