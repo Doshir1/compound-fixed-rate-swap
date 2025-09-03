@@ -35,6 +35,7 @@ query = """
     accounting {
       borrowApr
       supplyApr
+      price
     }
   }
 }
@@ -69,7 +70,7 @@ st.dataframe(df.tail(10))
 st.subheader("💡 Fixed Rate Swap Simulator")
 
 # User inputs
-eth_price = st.number_input("ETH Price (USD)", min_value=500, value=2000, step=50)
+eth_price = (price)
 eth_deposit = st.number_input("ETH Deposited as Collateral", min_value=0.1, value=10.0)
 fixed_rate = st.number_input("Fixed Rate (as %)", min_value=0.0, value=5.0, step=0.1)
 periods = st.slider("Number of Periods", 1, 12, 6)
