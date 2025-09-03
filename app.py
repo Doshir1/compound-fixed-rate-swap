@@ -6,7 +6,7 @@ import pandas as pd
 # 1. Page setup
 # --------------------------
 st.title("Compound Fixed Rate Swap Prototype")
-st.write("This app shows Compound APR data, fetches ETH price from CoinGecko, "
+st.write("This app shows Compound APR data, fetches ETH price from Polygon.io, "
          "and simulates a simple fixed–floating swap using ETH as collateral.")
 
 # --------------------------
@@ -17,22 +17,24 @@ LIQUIDATE_CF = 0.88 # 88.0%
 LIQ_PENALTY = 0.07  # 7%
 
 # --------------------------
-# 3. Fetch ETH Price from CoinGecko
+# 3. Fetch ETH Price from Polygon.io
 # --------------------------
+API_KEY_POLYGON = "on0FmvftNux2r3sVEmDVr4mR6n9e0ZCc"
+
 @st.cache_data(ttl=300)  # cache for 5 min
 def get_eth_price_usd():
-    url = "https://api.coingecko.com/api/v3/simple/price"
-    params = {"ids": "ethereum", "vs_currencies": "usd"}
-    r = requests.get(url, params=params, timeout=10)
+    url = f"https://api.polygon.io/v2/aggs/ticker/X:ETHUSD/prev?apiKey={API_KEY_POLYGON}"
+    r = requests.get(url, timeout=10)
     r.raise_for_status()
-    return float(r.json()["ethereum"]["usd"])
+    data = r.json()
+    return float(data["results"][0]["c"])  # closing price
 
 eth_price = None
 try:
     eth_price = get_eth_price_usd()
     st.success(f"💰 Current ETH Price (USD): ${eth_price:,.2f}")
 except Exception as e:
-    st.error("Failed to fetch ETH price from CoinGecko.")
+    st.error("Failed to fetch ETH price from Polygon.io.")
     eth_price = st.number_input("Enter ETH Price manually (USD)", min_value=500.0, value=2000.0, step=10.0)
 
 # --------------------------
