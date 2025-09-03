@@ -1,4 +1,4 @@
 streamlit
 pandas
 requests
-!pip install web3
+web3
