@@ -23,7 +23,7 @@ API_KEY_POLYGON = "on0FmvftNux2r3sVEmDVr4mR6n9e0ZCc"
 
 @st.cache_data(ttl=300)  # cache for 5 min
 def get_eth_price_usd():
-    url = f"https://api.polygon.io/v2/aggs/ticker/X:ETHUSD/prev?apiKey={API_KEY_POLYGON}"
+    url = f"https://api.polygon.io/v2/aggs/ticker/X:ETHGBP/prev?apiKey={API_KEY_POLYGON}"
     r = requests.get(url, timeout=10)
     r.raise_for_status()
     data = r.json()
