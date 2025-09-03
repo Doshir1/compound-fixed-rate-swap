@@ -1,160 +1,105 @@
-import os
-import math
+import streamlit as st
 import requests
 import pandas as pd
-import streamlit as st
-from web3 import Web3
 
-# 0) Page Setup
-# =========================
-st.set_page_config(page_title="Compound v3 Swap Simulator", layout="wide")
-st.title("Compound v3 Swap Simulator")
-st.caption("ETH collateral → USDC borrow. Fixed-vs-floating swap backtest using Compound v3 data.")
+# --------------------------
+# 1. Page setup
+# --------------------------
+st.title("Compound Fixed Rate Swap Simulator")
+st.write("Deposit ETH as collateral, borrow USDC, and compare Fixed vs Floating swaps.")
 
-# Addresses (Compound v3 USDC Comet + WETH)
-COMET_USDC_MAINNET = "0xc3d688B66703497DAA19211EEdff47f25384cdc3"
-WETH_MAINNET       = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+# --------------------------
+# 2. Fetch historical APR data (The Graph)
+# --------------------------
+api_key = "3b6cc500833cb7c07f3eb2e97bc88709"
+url = f"https://gateway.thegraph.com/api/{api_key}/subgraphs/id/5nwMCSHaTqG3Kd2gHznbTXEnZ9QNWsssQfbHhDqQSQFp"
 
-# Minimal ABI for getAssetInfoByAddress
-COMET_MIN_ABI = [
-    {
-        "inputs": [{"internalType":"address","name":"asset","type":"address"}],
-        "name":"getAssetInfoByAddress",
-        "outputs":[
-            {"components":[
-                {"internalType":"uint8","name":"offset","type":"uint8"},
-                {"internalType":"address","name":"asset","type":"address"},
-                {"internalType":"address","name":"priceFeed","type":"address"},
-                {"internalType":"uint64","name":"scale","type":"uint64"},
-                {"internalType":"uint64","name":"borrowCollateralFactor","type":"uint64"},
-                {"internalType":"uint64","name":"liquidateCollateralFactor","type":"uint64"},
-                {"internalType":"uint64","name":"liquidationFactor","type":"uint64"},
-                {"internalType":"uint128","name":"supplyCap","type":"uint128"}
-            ], "internalType":"struct AssetInfo","name":"","type":"tuple"}
-        ],
-        "stateMutability":"view",
-        "type":"function"
-    }
-]
-
-# =========================
-# 1) The Graph Data
-# =========================
-graph_api_key = "3b6cc500833cb7c07f3eb2e97bc88709"
-subgraph_id = "5nwMCSHaTqG3Kd2gHznbTXEnZ9QNWsssQfbHhDqQSQFp"
-url = f"https://gateway.thegraph.com/api/{graph_api_key}/subgraphs/id/{subgraph_id}"
+headers = {"Content-Type": "application/json"}
 
 query = """
 {
-  dailyMarketAccountings(first: 730, orderBy: timestamp, orderDirection: asc,
-    where: { market: "0xc3d688b66703497daa19211eedff47f25384cdc3" }) {
+  dailyMarketAccountings(first: 200, where: { market: "0xc3d688B66703497DAA19211EEdff47f25384cdc3" }) {
     timestamp
-    accounting { borrowApr supplyApr }
+    accounting {
+      borrowApr
+      supplyApr
+    }
   }
 }
 """
 
-st.info("Fetching APR history from The Graph...")
-resp = requests.post(url, json={"query": query}, headers={"Content-Type": "application/json"})
-raw = resp.json()["data"]["dailyMarketAccountings"]
+response = requests.post(url, json={"query": query}, headers=headers)
+data = response.json()
 
+# Convert to DataFrame
 df = pd.DataFrame({
-    "timestamp": [int(x["timestamp"]) for x in raw],
-    "borrowApr_annual": [float(x["accounting"]["borrowApr"]) for x in raw],
-    "supplyApr_annual": [float(x["accounting"]["supplyApr"]) for x in raw],
+    "timestamp": [entry["timestamp"] for entry in data["data"]["dailyMarketAccountings"]],
+    "borrowApr": [float(entry["accounting"]["borrowApr"]) for entry in data["data"]["dailyMarketAccountings"]],
+    "supplyApr": [float(entry["accounting"]["supplyApr"]) for entry in data["data"]["dailyMarketAccountings"]]
 })
-df["date"] = pd.to_datetime(df["timestamp"], unit="s")
-df = df.sort_values("date").reset_index(drop=True)
 
-# =========================
-# 2) Auto Fixed Rate (Backtest)
-# =========================
-mean_b = df["borrowApr_annual"].mean()
-std_b = df["borrowApr_annual"].std()
-fixed_rate_annual = mean_b + 0.5 * std_b   # automatic rule
-seconds_per_year = 365 * 24 * 3600
-fixed_rate_per_day = (1 + fixed_rate_annual) ** (1/365) - 1
+df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
+df = df.sort_values("timestamp")
 
-st.subheader("📌 Fixed Rate Determined from Backtest")
-st.write(f"Suggested fixed rate = mean + ½·std = **{fixed_rate_annual*100:.2f}% annual**")
-st.write(f"Equivalent to **{fixed_rate_per_day:.6f} per day**")
+# --------------------------
+# 3. Get ETH collateral factors from Compound API
+# --------------------------
+comet_api = "https://api.compound.finance/v2/ctoken"  # Compound v2 API (still valid for factors)
 
-# =========================
-# 3) Collateral Factors via Infura
-# =========================
-infura_url = "https://mainnet.infura.io/v3/dfe34c8812444c0e8f1e4806789f58d6"
-w3 = Web3(Web3.HTTPProvider(infura_url))
-comet = w3.eth.contract(address=w3.to_checksum_address(COMET_USDC_MAINNET), abi=COMET_MIN_ABI)
-info = comet.functions.getAssetInfoByAddress(w3.to_checksum_address(WETH_MAINNET)).call()
+eth_ctoken = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"  # WETH address
+collateral_data = requests.get(comet_api).json()
 
-borrow_cf = info[4] / 1e18
-liq_cf    = info[5] / 1e18
-liq_factor= info[6] / 1e18
-liq_penalty = 1 - liq_factor
+borrow_cf = None
+liquidate_cf = None
+for token in collateral_data["cToken"]:
+    if token["underlying_address"].lower() == eth_ctoken.lower():
+        borrow_cf = float(token["collateral_factor"]["value"])  # e.g. 0.75
+        liquidate_cf = float(token["reserve_factor"]["value"])  # fallback
+        break
 
-st.subheader("📌 Collateral Parameters (from Comet)")
-col = st.columns(3)
-col[0].metric("Borrow CF", f"{borrow_cf*100:.1f}%")
-col[1].metric("Liquidate CF", f"{liq_cf*100:.1f}%")
-col[2].metric("Penalty", f"{liq_penalty*100:.1f}%")
+if borrow_cf is None:
+    borrow_cf = 0.75  # fallback assumption
 
-# =========================
-# 4) User Inputs: ETH collateral
-# =========================
-st.subheader("💰 Collateral & Borrowing")
-eth_collateral = st.number_input("ETH collateral amount", min_value=0.1, value=10.0, step=0.1)
-eth_price = st.number_input("ETH price (USD)", min_value=500.0, value=3000.0, step=50.0)
+st.subheader("📊 Collateral Factors")
+st.write(f"**ETH Borrow Collateral Factor**: {borrow_cf:.2f}")
 
-collateral_usd = eth_collateral * eth_price
-max_borrow_usd = collateral_usd * borrow_cf
+# --------------------------
+# 4. Decide Fixed Rate (from backtest)
+# --------------------------
+avg_borrow_rate = df["borrowApr"].mean()
+fixed_rate = avg_borrow_rate * 1.1  # set 10% above average floating
+st.write(f"**Proposed Fixed Rate**: {fixed_rate*100:.2f}%")
 
-borrow_usd = st.number_input("Borrow amount (USDC)", min_value=100.0, max_value=float(max_borrow_usd), value=round(max_borrow_usd*0.9,2), step=100.0)
-st.write(f"- Collateral value: **${collateral_usd:,.2f}**")
-st.write(f"- Max borrow allowed: **${max_borrow_usd:,.2f}**")
+# --------------------------
+# 5. Swap Simulation
+# --------------------------
+st.subheader("💡 Swap Simulation")
 
-# =========================
-# 5) Simulation (daily)
-# =========================
-st.subheader("📊 Swap Simulation (Daily Cashflows)")
-sim_days = st.slider("Simulation horizon (days)", 30, 365, 180)
+eth_price = 2000  # USD (for simplicity, normally pull from oracle)
+eth_collateral = st.number_input("ETH Collateral Supplied", min_value=1.0, value=10.0, step=0.5)
 
-hist = df.tail(sim_days).copy()
-hist["borrow_rate_daily"] = (1 + hist["borrowApr_annual"]) ** (1/365) - 1
+borrow_capacity = eth_collateral * eth_price * borrow_cf
+st.write(f"Borrow Capacity (in USDC): **${borrow_capacity:,.2f}**")
 
-outstanding = borrow_usd
-rows = []
-cum_net = 0
+periods = st.slider("Number of Periods", 1, 12, 6)
 
-for i, row in hist.iterrows():
-    day = row["date"].date()
-    rf = float(row["borrow_rate_daily"])
-    fixed_pay = borrow_usd * fixed_rate_per_day
-    float_pay = outstanding * rf
-    net = fixed_pay - float_pay
-    cum_net += net
+# Example fixed vs floating
+fixed_payment = borrow_capacity * fixed_rate
+floating_rates = df["borrowApr"].tail(periods).values
 
-    outstanding *= (1 + rf)
-    liq_threshold = liq_cf * collateral_usd
-    breach = outstanding > liq_threshold
-
-    rows.append({
-        "date": day,
-        "float_interest": float_pay,
-        "fixed_payment": fixed_pay,
-        "net_cashflow": net,
-        "cum_net_cashflow": cum_net,
-        "outstanding_debt": outstanding,
-        "liq_threshold": liq_threshold,
-        "ltv": outstanding / collateral_usd,
-        "liquidated": breach
+results = []
+for i in range(periods):
+    floating_payment = borrow_capacity * floating_rates[i]
+    net_cashflow = fixed_payment - floating_payment
+    results.append({
+        "Period": i + 1,
+        "Floating Rate": floating_rates[i],
+        "Floating Payment": floating_payment,
+        "Fixed Payment": fixed_payment,
+        "Net Cashflow": net_cashflow
     })
 
-sim = pd.DataFrame(rows)
+results_df = pd.DataFrame(results)
+st.dataframe(results_df)
 
-st.dataframe(sim.tail(10))
-st.line_chart(sim.set_index("date")[["fixed_payment","float_interest"]])
-st.line_chart(sim.set_index("date")[["cum_net_cashflow"]])
-st.line_chart(sim.set_index("date")[["outstanding_debt","liq_threshold"]])
-
-any_liq = sim["liquidated"].any()
-st.warning("⚠️ Liquidation would occur!" if any_liq else "✅ Position remains healthy")
+st.line_chart(results_df[["Floating Payment", "Fixed Payment"]].set_index(results_df["Period"]))
