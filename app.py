@@ -5,20 +5,23 @@ import pandas as pd
 # --------------------------
 # 1. Page setup
 # --------------------------
-st.title("Compound Fixed Rate Swap Simulator")
-st.write("Deposit ETH as collateral, borrow USDC, and compare Fixed vs Floating swaps.")
+st.title("Compound v3 Swap Tool")
+st.write("This app shows Compound APR data, collateral factors, and simulates a fixed-vs-floating interest rate swap.")
 
 # --------------------------
-# 2. Fetch historical APR data (The Graph)
+# 2. The Graph API setup
 # --------------------------
 api_key = "3b6cc500833cb7c07f3eb2e97bc88709"
 url = f"https://gateway.thegraph.com/api/{api_key}/subgraphs/id/5nwMCSHaTqG3Kd2gHznbTXEnZ9QNWsssQfbHhDqQSQFp"
 
 headers = {"Content-Type": "application/json"}
 
-query = """
+# --------------------------
+# 3. Query APR data
+# --------------------------
+apr_query = """
 {
-  dailyMarketAccountings(first: 200, where: { market: "0xc3d688B66703497DAA19211EEdff47f25384cdc3" }) {
+  dailyMarketAccountings(first: 100, where: { market: "0xc3d688B66703497DAA19211EEdff47f25384cdc3" }) {
     timestamp
     accounting {
       borrowApr
@@ -28,68 +31,77 @@ query = """
 }
 """
 
-response = requests.post(url, json={"query": query}, headers=headers)
-data = response.json()
+apr_response = requests.post(url, json={"query": apr_query}, headers=headers).json()
 
-# Convert to DataFrame
+# Convert APR data into DataFrame
 df = pd.DataFrame({
-    "timestamp": [entry["timestamp"] for entry in data["data"]["dailyMarketAccountings"]],
-    "borrowApr": [float(entry["accounting"]["borrowApr"]) for entry in data["data"]["dailyMarketAccountings"]],
-    "supplyApr": [float(entry["accounting"]["supplyApr"]) for entry in data["data"]["dailyMarketAccountings"]]
+    "timestamp": [entry["timestamp"] for entry in apr_response["data"]["dailyMarketAccountings"]],
+    "borrowApr": [float(entry["accounting"]["borrowApr"]) for entry in apr_response["data"]["dailyMarketAccountings"]],
+    "supplyApr": [float(entry["accounting"]["supplyApr"]) for entry in apr_response["data"]["dailyMarketAccountings"]]
 })
-
 df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
 df = df.sort_values("timestamp")
 
 # --------------------------
-# 3. Get ETH collateral factors from Compound API
+# 4. Query Collateral Factors
 # --------------------------
-comet_api = "https://api.compound.finance/v2/ctoken"  # Compound v2 API (still valid for factors)
+collateral_query = """
+{
+  markets(where: { id: "0xc3d688b66703497daa19211eedff47f25384cdc3" }) {
+    name
+    collateralAssets {
+      id
+      borrowCollateralFactor
+      liquidateCollateralFactor
+      liquidationFactor
+    }
+  }
+}
+"""
 
-eth_ctoken = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"  # WETH address
-collateral_data = requests.get(comet_api).json()
+collateral_response = requests.post(url, json={"query": collateral_query}, headers=headers).json()
+collateral_data = collateral_response["data"]["markets"][0]["collateralAssets"]
 
-borrow_cf = None
-liquidate_cf = None
-for token in collateral_data["cToken"]:
-    if token["underlying_address"].lower() == eth_ctoken.lower():
-        borrow_cf = float(token["collateral_factor"]["value"])  # e.g. 0.75
-        liquidate_cf = float(token["reserve_factor"]["value"])  # fallback
-        break
-
-if borrow_cf is None:
-    borrow_cf = 0.75  # fallback assumption
-
-st.subheader("📊 Collateral Factors")
-st.write(f"**ETH Borrow Collateral Factor**: {borrow_cf:.2f}")
-
-# --------------------------
-# 4. Decide Fixed Rate (from backtest)
-# --------------------------
-avg_borrow_rate = df["borrowApr"].mean()
-fixed_rate = avg_borrow_rate * 1.1  # set 10% above average floating
-st.write(f"**Proposed Fixed Rate**: {fixed_rate*100:.2f}%")
+collateral_df = pd.DataFrame(collateral_data)
+collateral_df["borrowCollateralFactor"] = collateral_df["borrowCollateralFactor"].astype(float) / 1e18
+collateral_df["liquidateCollateralFactor"] = collateral_df["liquidateCollateralFactor"].astype(float) / 1e18
+collateral_df["liquidationFactor"] = collateral_df["liquidationFactor"].astype(float) / 1e18
 
 # --------------------------
-# 5. Swap Simulation
+# 5. Show Data
 # --------------------------
-st.subheader("💡 Swap Simulation")
+st.subheader("📊 Historical APR Data")
+st.line_chart(df.set_index("timestamp")[["borrowApr", "supplyApr"]])
+st.write("Raw data preview:")
+st.dataframe(df.tail(10))
 
-eth_price = 2000  # USD (for simplicity, normally pull from oracle)
-eth_collateral = st.number_input("ETH Collateral Supplied", min_value=1.0, value=10.0, step=0.5)
+st.subheader("📌 Collateral Factors")
+st.dataframe(collateral_df)
 
-borrow_capacity = eth_collateral * eth_price * borrow_cf
-st.write(f"Borrow Capacity (in USDC): **${borrow_capacity:,.2f}**")
+# --------------------------
+# 6. Swap Simulator
+# --------------------------
+st.subheader("💡 Fixed vs Floating Swap Simulator")
 
+notional = st.number_input("Collateral (ETH)", min_value=1.0, value=10.0)
+eth_price = 3000  # you could pull this live via API
+borrow_factor = collateral_df.iloc[0]["borrowCollateralFactor"]  # take first asset for now
+
+# Borrowable USD
+borrowable_usd = notional * eth_price * borrow_factor
+st.write(f"With {notional} ETH, you can borrow up to **${borrowable_usd:,.2f}**")
+
+# Choose fixed rate
+fixed_rate = st.slider("Choose Fixed Rate (%)", 1.0, 10.0, 5.0)
 periods = st.slider("Number of Periods", 1, 12, 6)
 
-# Example fixed vs floating
-fixed_payment = borrow_capacity * fixed_rate
+# Simulate payments
 floating_rates = df["borrowApr"].tail(periods).values
+fixed_payment = borrowable_usd * (fixed_rate / 100)
 
 results = []
 for i in range(periods):
-    floating_payment = borrow_capacity * floating_rates[i]
+    floating_payment = borrowable_usd * floating_rates[i]
     net_cashflow = fixed_payment - floating_payment
     results.append({
         "Period": i + 1,
@@ -101,5 +113,4 @@ for i in range(periods):
 
 results_df = pd.DataFrame(results)
 st.dataframe(results_df)
-
 st.line_chart(results_df[["Floating Payment", "Fixed Payment"]].set_index(results_df["Period"]))
