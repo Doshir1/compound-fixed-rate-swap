@@ -7,7 +7,7 @@ import pandas as pd
 # --------------------------
 st.title("Compound Fixed Rate Swap Prototype")
 st.write("This app shows Compound APR data, fetches ETH price from Polygon.io, "
-         "and simulates a simple fixed–floating swap using ETH as collateral.")
+         "and simulates a fixed–floating swap using ETH as collateral with a simple backtest.")
 
 # --------------------------
 # 2. Collateral Factors
@@ -27,7 +27,7 @@ def get_eth_price_usd():
     r = requests.get(url, timeout=10)
     r.raise_for_status()
     data = r.json()
-    return float(data["results"][0]["c"])  # closing price
+    return float(data["results"][0]["c"])
 
 eth_price = None
 try:
@@ -64,7 +64,6 @@ query = """
 response = requests.post(url, json={"query": query}, headers=headers)
 data = response.json()
 
-# Convert to DataFrame
 df = pd.DataFrame({
     "timestamp": [entry["timestamp"] for entry in data["data"]["dailyMarketAccountings"]],
     "borrowApr": [float(entry["accounting"]["borrowApr"]) for entry in data["data"]["dailyMarketAccountings"]],
@@ -72,9 +71,9 @@ df = pd.DataFrame({
 })
 
 df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
-df = df.sort_values("timestamp")  # Oldest → newest
+df = df.sort_values("timestamp")
 
-# Keep only the 10 most recent APRs
+# Keep only last 10 days
 df_recent = df.tail(10)
 
 # --------------------------
@@ -85,43 +84,45 @@ st.line_chart(df_recent.set_index("timestamp")[["borrowApr", "supplyApr"]])
 st.dataframe(df_recent)
 
 # --------------------------
-# 6. Swap Simulator
+# 6. Backtest & Predict Rates
+# --------------------------
+st.subheader("🔮 Rate Backtest & Forecast")
+
+# Backtested fixed rate: max past borrow APR + margin
+margin = 0.001  # 0.1%
+fixed_rate = df_recent["borrowApr"].max() + margin
+
+# Predicted floating rate: moving average of recent borrow APRs
+predicted_floating_rate = df_recent["borrowApr"].mean()
+
+st.write(f"📈 Backtested Fixed Rate (annual %): {fixed_rate*100:.2f}%")
+st.write(f"🌊 Predicted Future Floating Rate (annual %): {predicted_floating_rate*100:.2f}%")
+
+# --------------------------
+# 7. Swap Simulator
 # --------------------------
 st.subheader("💡 Fixed Rate Swap Simulator")
 
 eth_collateral = st.number_input("Deposit ETH as Collateral", min_value=1.0, value=10.0, step=0.5)
 periods = st.slider("Number of Periods (months)", 1, 12, 6)
 
-# --------------------------
-# 6a. Automatically set fixed rate based on recent APRs
-# --------------------------
-historical_borrow_aprs = df_recent["borrowApr"].tail(periods).values
-margin = 0.001  # ensure fixed > borrow
-fixed_rate = max(historical_borrow_aprs) + margin
-st.write(f"📈 Automatically suggested Fixed Rate (annual %): {fixed_rate*100:.2f}%")
-
-# --------------------------
 # Borrow capacity (USD)
-# --------------------------
 collateral_value_usd = eth_collateral * eth_price
 max_borrow_usd = collateral_value_usd * BORROW_CF
 
 st.write(f"🔒 Collateral Value: ${collateral_value_usd:,.2f}")
 st.write(f"📉 Max Borrow Capacity (using {BORROW_CF*100:.1f}% factor): ${max_borrow_usd:,.2f}")
 
-# --------------------------
-# Cashflows
-# --------------------------
-floating_rates = df_recent["borrowApr"].tail(periods).values
-fixed_payment = max_borrow_usd * fixed_rate / 12  # monthly fixed
+# Cashflows: fixed vs predicted floating
+fixed_payment = max_borrow_usd * fixed_rate / 12
+floating_payment = max_borrow_usd * predicted_floating_rate / 12
 
 results = []
 for i in range(periods):
-    floating_payment = max_borrow_usd * floating_rates[i] / 12
     net_cashflow = fixed_payment - floating_payment
     results.append({
         "Period": i + 1,
-        "Floating Rate": f"{floating_rates[i]*100:.2f}%",
+        "Predicted Floating Rate": f"{predicted_floating_rate*100:.2f}%",
         "Floating Payment": floating_payment,
         "Fixed Payment": fixed_payment,
         "Net Cashflow": net_cashflow
@@ -132,7 +133,7 @@ st.dataframe(results_df)
 st.line_chart(results_df.set_index("Period")[["Floating Payment", "Fixed Payment"]])
 
 # --------------------------
-# 7. Liquidation Check
+# 8. Liquidation Check
 # --------------------------
 st.subheader("⚠️ Liquidation Risk Check")
 
