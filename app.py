@@ -6,7 +6,7 @@ import numpy as np
 # --------------------------
 # 1. Page setup
 # --------------------------
-st.title("Compound Fixed Rate Swap Prototype — Daily Simulation")
+st.title("Compound Fixed Rate Swap Prototype — Daily Simulation with Liquidation")
 st.write(
     "Shows recent APRs, runs a backtest to pick a fixed rate, simulates daily cashflows, "
     "and checks liquidation risk."
@@ -15,8 +15,8 @@ st.write(
 # --------------------------
 # 2. Collateral Factors
 # --------------------------
-BORROW_CF = 0.825
-LIQUIDATE_CF = 0.88
+BORROW_CF = 0.825   # 82.5%
+LIQUIDATE_CF = 0.88 # 88.0%
 
 # --------------------------
 # 3. Fetch ETH Price
@@ -87,7 +87,7 @@ st.line_chart(df_recent.set_index("timestamp")[["borrowApr", "supplyApr"]])
 st.dataframe(df_recent.reset_index(drop=True))
 
 # --------------------------
-# 6. Forecast
+# 6. Backtest & Forecast
 # --------------------------
 st.subheader("🔮 Backtest & Forecast")
 
@@ -114,31 +114,50 @@ def ar1_forecast(series: pd.Series, n_steps: int):
     return np.array(forecasts)
 
 # --------------------------
-# 7. Swap Simulator
+# 7. Swap Simulator with Borrow Capacity & Dynamic Liquidation
 # --------------------------
-st.subheader("💡 Fixed–Floating Swap Simulator (Daily)")
+st.subheader("💡 Fixed–Floating Swap Simulator (Daily + Dynamic Liquidation)")
 
 eth_collateral = st.number_input("Deposit ETH as Collateral", min_value=1.0, value=10.0, step=0.5)
 days = st.slider("Number of Days", 1, 90, 30)
 
-predicted_floating_rates = ar1_forecast(df_recent["borrowApr"], days)
-fixed_rate_annual = max(backtest_fixed, predicted_floating_rates.max() + 0.0005)
-
-fixed_rate_daily = (1 + fixed_rate_annual) ** (1/365) - 1
-floating_rates_daily = (1 + predicted_floating_rates) ** (1/365) - 1
-
+# Borrow capacity calculations
 collateral_value_usd = eth_collateral * eth_price
 max_borrow_usd = collateral_value_usd * BORROW_CF
 liquidation_threshold = collateral_value_usd * LIQUIDATE_CF
 
-# Daily cashflows with cumulative
+st.write(f"🔒 Collateral Value: ${collateral_value_usd:,.2f}")
+st.write(f"📉 Max Borrow Capacity (using {BORROW_CF*100:.1f}% factor): ${max_borrow_usd:,.2f}")
+st.write(f"⚠️ Liquidation Threshold (at {LIQUIDATE_CF*100:.1f}%): ${liquidation_threshold:,.2f}")
+
+# Forecast floating rates
+predicted_floating_rates = ar1_forecast(df_recent["borrowApr"], days)
+
+# Fixed rate: always > predicted floating rates
+fixed_rate_annual = max(backtest_fixed, predicted_floating_rates.max() + 0.0005)
+fixed_rate_daily = (1 + fixed_rate_annual) ** (1/365) - 1
+floating_rates_daily = (1 + predicted_floating_rates) ** (1/365) - 1
+
+st.write(f"📈 Fixed Rate (annual): {fixed_rate_annual*100:.2f}%")
+st.write(f"➡️ Daily accrual: {fixed_rate_daily*100:.4f}%")
+
+# --------------------------
+# Daily cashflows with cumulative net
+# --------------------------
 results = []
 cumulative_net = 0.0
+liquidated_day = None
+
 for i in range(days):
     floating_payment = max_borrow_usd * floating_rates_daily[i]
     fixed_payment = max_borrow_usd * fixed_rate_daily
     net = fixed_payment - floating_payment
     cumulative_net += net
+
+    # Effective debt for dynamic liquidation
+    effective_debt = max_borrow_usd - cumulative_net
+    if effective_debt > liquidation_threshold and liquidated_day is None:
+        liquidated_day = i + 1
 
     results.append({
         "Day": i + 1,
@@ -155,11 +174,10 @@ st.dataframe(results_df)
 st.line_chart(results_df.set_index("Day")[["Floating Payment (USD)", "Fixed Payment (USD)"]])
 
 # --------------------------
-# 8. Liquidation Check
+# 8. Liquidation Check Section
 # --------------------------
 st.subheader("⚠️ Liquidation Risk Check")
-
-if max_borrow_usd > liquidation_threshold:
-    st.error("❌ Position exceeds liquidation threshold! Risk of liquidation.")
+if liquidated_day:
+    st.error(f"❌ Liquidation triggered on Day {liquidated_day}! Collateral absorbed.")
 else:
-    st.success("✅ Position is safe under current collateral factors.")
+    st.success("✅ No liquidation during the simulation horizon.")
