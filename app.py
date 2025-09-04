@@ -76,12 +76,17 @@ if df["borrowApr"].mean() > 1:
     df["supplyApr"] /= 100
 
 # --------------------------
-# 5. Display most recent 10 APRs (descending)
+# 5. Display most recent 10 days
 # --------------------------
-df_recent = df.tail(10).copy()
-df_recent_display = df_recent.sort_values("timestamp", ascending=False)  # Most recent first
-st.subheader("📊 Most Recent 10 APRs")
-st.dataframe(df_recent_display.reset_index(drop=True))
+today = pd.Timestamp.today().normalize()
+last_10_days = today - pd.to_timedelta(np.arange(10), unit='d')
+df["date_only"] = df["timestamp"].dt.normalize()
+df_last10 = df[df["date_only"].isin(last_10_days)]
+if len(df_last10) < 10:
+    df_last10 = df.tail(10)
+df_last10 = df_last10.sort_values("timestamp", ascending=False)
+st.subheader("📊 Most Recent 10 APRs (Last 10 Days)")
+st.dataframe(df_last10[["timestamp", "borrowApr", "supplyApr"]].reset_index(drop=True))
 
 st.subheader("📈 Historical APR Chart (Full 1000 Days)")
 st.line_chart(df.set_index("timestamp")[["borrowApr", "supplyApr"]])
@@ -109,7 +114,6 @@ st.write(f"⚠️ Liquidation Threshold: ${liquidation_threshold:,.2f}")
 # --------------------------
 st.subheader("🔮 Backtest for Floating & Fixed Rates")
 
-# AR(1) forecast helper for daily variability
 def ar1_forecast_varying(series: pd.Series, n_days: int):
     mu = series.mean()
     phi = 0.8  # moderate autocorrelation
@@ -118,17 +122,15 @@ def ar1_forecast_varying(series: pd.Series, n_days: int):
     cur = last
     rng = np.random.default_rng(seed=42)
     for _ in range(n_days):
-        shock = rng.normal(scale=0.002)  # small random daily variation
+        shock = rng.normal(scale=0.002)
         nxt = mu + phi * (cur - mu) + shock
         nxt = max(nxt, 0.0)
         forecasts.append(nxt)
         cur = nxt
     return np.array(forecasts)
 
-# Run backtest using full historical data
 predicted_floating_rates = ar1_forecast_varying(df["borrowApr"], simulation_days)
 
-# Fixed rate = max predicted floating + margin
 fixed_rate_annual = predicted_floating_rates.max() + 0.0005
 fixed_rate_daily = (1 + fixed_rate_annual) ** (1/365) - 1
 floating_rates_daily = (1 + predicted_floating_rates) ** (1/365) - 1
@@ -154,7 +156,6 @@ for i in range(simulation_days):
     effective_debt = max_borrow_usd - cumulative_net
     if effective_debt > liquidation_threshold and liquidated_day is None:
         liquidated_day = i + 1
-        # absorb() placeholder
         st.warning(f"Absorb() called on Day {liquidated_day} due to LCF breach!")
 
     results.append({
