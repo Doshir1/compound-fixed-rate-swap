@@ -6,10 +6,10 @@ import numpy as np
 # --------------------------
 # 1. Page setup
 # --------------------------
-st.title("Compound Fixed Rate Swap Prototype — Time-varying Floating Forecast")
+st.title("Compound Fixed Rate Swap Prototype — Daily Simulation")
 st.write(
-    "Shows recent APRs (last 10), runs a simple backtest to pick a fixed rate, "
-    "and forecasts a changing floating rate for the simulated periods (AR(1))."
+    "Shows recent APRs (last 10 days), runs a simple backtest to pick a fixed rate, "
+    "and simulates a fixed–floating swap with daily cashflows."
 )
 
 # --------------------------
@@ -17,7 +17,6 @@ st.write(
 # --------------------------
 BORROW_CF = 0.825   # 82.5%
 LIQUIDATE_CF = 0.88 # 88.0%
-LIQ_PENALTY = 0.07  # 7%
 
 # --------------------------
 # 3. Fetch ETH Price from Polygon.io
@@ -32,7 +31,6 @@ def get_eth_price_usd():
     data = r.json()
     return float(data["results"][0]["c"])
 
-eth_price = None
 try:
     eth_price = get_eth_price_usd()
     st.success(f"💰 Current ETH Price (USD): ${eth_price:,.2f}")
@@ -67,7 +65,6 @@ query = """
 response = requests.post(url, json={"query": query}, headers=headers)
 data = response.json()
 
-# Convert to DataFrame
 df = pd.DataFrame({
     "timestamp": [entry["timestamp"] for entry in data["data"]["dailyMarketAccountings"]],
     "borrowApr": [float(entry["accounting"]["borrowApr"]) for entry in data["data"]["dailyMarketAccountings"]],
@@ -76,126 +73,103 @@ df = pd.DataFrame({
 
 df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
 df = df.sort_values("timestamp")  # oldest -> newest
-
-# Keep only the 10 most recent APRs
 df_recent = df.tail(10).copy()
 
-# Safety: sometimes API returns % as 5.0 for 5% instead of 0.05.
-# If values look > 1 on average, treat them as percents and convert.
+# Safety check: convert % to decimals if needed
 if df_recent["borrowApr"].mean() > 1:
-    df_recent["borrowApr"] = df_recent["borrowApr"] / 100.0
-    df_recent["supplyApr"] = df_recent["supplyApr"] / 100.0
+    df_recent["borrowApr"] /= 100.0
+    df_recent["supplyApr"] /= 100.0
 
 # --------------------------
 # 5. Show Recent APRs
 # --------------------------
-st.subheader("📊 Most Recent APR Data (Last 10 Entries)")
+st.subheader("📊 Most Recent APR Data (Last 10 Days)")
 st.line_chart(df_recent.set_index("timestamp")[["borrowApr", "supplyApr"]])
 st.dataframe(df_recent.reset_index(drop=True))
 
 # --------------------------
-# 6. Backtest & Forecast (AR(1) simple)
+# 6. Backtest & Forecast
 # --------------------------
-st.subheader("🔮 Backtest (fixed rate) & AR(1) forecast (time-varying floating)")
+st.subheader("🔮 Backtest & Forecast")
 
-# Backtest-derived fixed rate: max historical recent APR + margin
-margin = 0.001  # 0.1% absolute (in decimal)
+# Fixed = max past borrow APR + margin
+margin = 0.001
 backtest_fixed = df_recent["borrowApr"].max() + margin
 
-# Simple AR(1) forecasting for 'periods' steps:
+# AR(1) forecast
 def ar1_forecast(series: pd.Series, n_steps: int):
-    """
-    Very simple AR(1) forecast:
-      - mu = series.mean()
-      - phi = lag-1 autocorrelation (clipped)
-      - forecast recursively: r_{t+1} = mu + phi*(r_t - mu)
-    Returns np.array of length n_steps (forecasts).
-    """
     vals = series.values
     if len(vals) < 2:
-        # not enough data -> flat forecast at last observed or mean
-        start = float(series.iloc[-1]) if len(vals) == 1 else float(series.mean() if len(vals) else 0.0)
-        return np.array([start for _ in range(n_steps)])
+        return np.array([series.iloc[-1]] * n_steps)
     mu = float(series.mean())
-    # compute lag-1 autocorrelation (phi)
     centered = vals - mu
     num = np.sum(centered[1:] * centered[:-1])
-    den = np.sum(centered[:-1] ** 2) if np.sum(centered[:-1] ** 2) != 0 else 1e-12
-    phi = num / den
-    # Clip phi to a safe range to avoid explosive forecasts
-    phi = float(np.clip(phi, -0.99, 0.99))
+    den = np.sum(centered[:-1] ** 2) or 1e-12
+    phi = np.clip(num / den, -0.99, 0.99)
     last = float(vals[-1])
     forecasts = []
     cur = last
     for _ in range(n_steps):
         nxt = mu + phi * (cur - mu)
-        # prevent negative rates
         nxt = max(nxt, 0.0)
         forecasts.append(nxt)
         cur = nxt
     return np.array(forecasts)
 
 # --------------------------
-# 7. Swap Simulator UI
+# 7. Swap Simulator
 # --------------------------
-st.subheader("💡 Fixed–Floating Swap Simulator")
+st.subheader("💡 Fixed–Floating Swap Simulator (Daily)")
+
 eth_collateral = st.number_input("Deposit ETH as Collateral", min_value=1.0, value=10.0, step=0.5)
-periods = st.slider("Number of Periods (months)", 1, 12, 6)
+days = st.slider("Number of Days", 1, 90, 30)  # forecast horizon
 
-# Forecast the floating rate across 'periods' future periods (time-varying)
-predicted_floating_rates = ar1_forecast(df_recent["borrowApr"], periods)
+predicted_floating_rates = ar1_forecast(df_recent["borrowApr"], days)
 
-# Ensure fixed rate is greater than any predicted floating rate too
-fixed_rate = max(backtest_fixed, predicted_floating_rates.max() + 0.0005)  # small extra buffer
-st.write(f"📈 Fixed Rate (backtest-based, annual %): {fixed_rate*100:.2f}%")
+# Ensure fixed > any predicted floating
+fixed_rate_annual = max(backtest_fixed, predicted_floating_rates.max() + 0.0005)
 
-# Also show predicted floating rate series
-pred_df = pd.DataFrame({
-    "Period": np.arange(1, periods + 1),
-    "Predicted Floating APR": predicted_floating_rates
-})
-st.write("🌊 Predicted (time-varying) floating APRs by period")
-st.table((pred_df.assign(**{"Predicted Floating APR (%)": pred_df["Predicted Floating APR"]*100})
-          [["Period", "Predicted Floating APR (%)"]]).set_index("Period"))
+# Convert to daily accruals
+fixed_rate_daily = (1 + fixed_rate_annual) ** (1/365) - 1
+floating_rates_daily = (1 + predicted_floating_rates) ** (1/365) - 1
 
-# --------------------------
-# 8. Borrow capacity (USD)
-# --------------------------
+st.write(f"📈 Fixed Rate (annual): {fixed_rate_annual*100:.2f}%")
+st.write(f"➡️ Equivalent Fixed Rate (daily accrual): {fixed_rate_daily*100:.4f}%")
+
+# Borrow capacity
 collateral_value_usd = eth_collateral * eth_price
 max_borrow_usd = collateral_value_usd * BORROW_CF
-
 st.write(f"🔒 Collateral Value: ${collateral_value_usd:,.2f}")
-st.write(f"📉 Max Borrow Capacity (using {BORROW_CF*100:.1f}% factor): ${max_borrow_usd:,.2f}")
+st.write(f"📉 Max Borrow Capacity: ${max_borrow_usd:,.2f}")
 
-# --------------------------
-# 9. Cashflow Simulation using time-varying predicted floating rates
-# --------------------------
-fixed_payments = [max_borrow_usd * fixed_rate / 12.0 for _ in range(periods)]
-floating_payments = [max_borrow_usd * r / 12.0 for r in predicted_floating_rates]
+# Daily payments
+fixed_payments = [max_borrow_usd * fixed_rate_daily for _ in range(days)]
+floating_payments = [max_borrow_usd * r for r in floating_rates_daily]
 
 results = []
-for i in range(periods):
-    net_cashflow = fixed_payments[i] - floating_payments[i]
+for i in range(days):
+    net = fixed_payments[i] - floating_payments[i]
     results.append({
-        "Period": i + 1,
-        "Predicted Floating APR (%)": f"{predicted_floating_rates[i]*100:.4f}",
+        "Day": i + 1,
+        "Floating APR (annual %)": f"{predicted_floating_rates[i]*100:.4f}",
+        "Floating Daily Rate (%)": f"{floating_rates_daily[i]*100:.6f}",
         "Floating Payment (USD)": floating_payments[i],
         "Fixed Payment (USD)": fixed_payments[i],
-        "Net Cashflow (USD)": net_cashflow
+        "Net Cashflow (USD)": net
     })
 
 results_df = pd.DataFrame(results)
 st.dataframe(results_df)
-st.line_chart(results_df.set_index("Period")[["Floating Payment (USD)", "Fixed Payment (USD)"]])
+st.line_chart(results_df.set_index("Day")[["Floating Payment (USD)", "Fixed Payment (USD)"]])
 
 # --------------------------
-# 10. Liquidation Check
+# 8. Liquidation Check
 # --------------------------
 st.subheader("⚠️ Liquidation Risk Check")
 liquidation_threshold = collateral_value_usd * LIQUIDATE_CF
-st.write(f"Liquidation Threshold (at {LIQUIDATE_CF*100:.1f}%): ${liquidation_threshold:,.2f}")
+st.write(f"Threshold: ${liquidation_threshold:,.2f}")
 
 if max_borrow_usd > liquidation_threshold:
-    st.error("❌ Position exceeds liquidation threshold! Risk of liquidation.")
+    st.error("❌ Risk of liquidation!")
 else:
-    st.success("✅ Position is safe under current collateral factors.")
+    st.success("✅ Position is safe.")
