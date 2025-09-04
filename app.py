@@ -90,7 +90,7 @@ st.dataframe(df_recent.reset_index(drop=True))
 # --------------------------
 # 6. Backtest & Forecast
 # --------------------------
-st.subheader("🔮 Backtest & Forecast")
+st.subheader("Backtest & Forecast")
 
 # Fixed = max past borrow APR + margin
 margin = 0.001
