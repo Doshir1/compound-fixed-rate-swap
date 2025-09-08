@@ -1,3 +1,6 @@
+# --------------------------
+# Compound Fixed Rate Swap Simulator — Streamlit + web3.py
+# --------------------------
 
 import streamlit as st
 import requests
@@ -36,37 +39,33 @@ else:
 comet_address = Web3.to_checksum_address("0xc3d688B66703497DAA19211EEdff47f25384cdc3")
 eth_address = Web3.to_checksum_address("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")  # WETH
 
+# Comet ABI (simplified)
 comet_abi = json.loads("""
 [
   {
-    "inputs": [{ "internalType": "address", "name": "asset", "type": "address" }],
-    "name": "getAssetInfoByAddress",
-    "outputs": [
-      {
-        "components": [
-          { "internalType": "uint8", "name": "offset", "type": "uint8" },
-          { "internalType": "address", "name": "asset", "type": "address" },
-          { "internalType": "address", "name": "priceFeed", "type": "address" },
-          { "internalType": "uint64", "name": "scale", "type": "uint64" },
-          { "internalType": "uint64", "name": "borrowCollateralFactor", "type": "uint64" },
-          { "internalType": "uint64", "name": "liquidateCollateralFactor", "type": "uint64" },
-          { "internalType": "uint64", "name": "liquidationFactor", "type": "uint64" },
-          { "internalType": "uint128", "name": "supplyCap", "type": "uint128" }
-        ],
-        "internalType": "struct AssetInfo",
-        "name": "",
-        "type": "tuple"
-      }
+    "inputs": [{"internalType":"address","name":"asset","type":"address"}],
+    "name":"getAssetInfoByAddress",
+    "outputs":[
+      {"components":[
+        {"internalType":"uint8","name":"offset","type":"uint8"},
+        {"internalType":"address","name":"asset","type":"address"},
+        {"internalType":"address","name":"priceFeed","type":"address"},
+        {"internalType":"uint64","name":"scale","type":"uint64"},
+        {"internalType":"uint64","name":"borrowCollateralFactor","type":"uint64"},
+        {"internalType":"uint64","name":"liquidateCollateralFactor","type":"uint64"},
+        {"internalType":"uint64","name":"liquidationFactor","type":"uint64"},
+        {"internalType":"uint128","name":"supplyCap","type":"uint128"}
+      ],"internalType":"struct AssetInfo","name":"","type":"tuple"}
     ],
-    "stateMutability": "view",
-    "type": "function"
+    "stateMutability":"view",
+    "type":"function"
   },
   {
-    "inputs": [{ "internalType": "address", "name": "priceFeed", "type": "address" }],
-    "name": "getPrice",
-    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
-    "stateMutability": "view",
-    "type": "function"
+    "inputs":[{"internalType":"address","name":"priceFeed","type":"address"}],
+    "name":"getPrice",
+    "outputs":[{"internalType":"uint256","name":"","type":"uint256"}],
+    "stateMutability":"view",
+    "type":"function"
   }
 ]
 """)
