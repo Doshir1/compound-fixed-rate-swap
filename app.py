@@ -1,5 +1,5 @@
 # --------------------------
-# Compound Fixed Rate Swap Simulator — Streamlit + web3.py
+# Compound Fixed Rate Swap Simulator — Streamlit + Infura (No web3.py)
 # --------------------------
 
 import streamlit as st
@@ -7,7 +7,6 @@ import requests
 import pandas as pd
 import numpy as np
 import json
-from web3 import Web3
 
 # --------------------------
 # 1. Page setup
@@ -15,80 +14,62 @@ from web3 import Web3
 st.set_page_config(page_title="Compound Fixed Rate Swap", layout="wide")
 st.title("Compound Fixed Rate Swap Simulator — Mainnet ETH/USDC")
 st.write("""
-This app connects to Ethereum mainnet (Compound v3 Comet),
+This app connects to Ethereum mainnet via Infura (without web3.py),
 fetches historical APRs from The Graph, runs a backtest to predict
 daily floating rates, automatically sets a fixed rate, simulates cashflows,
 and checks liquidation risk using real collateral factors.
 """)
 
 # --------------------------
-# 2. Web3 Connection
+# 2. Infura connection test
 # --------------------------
 INFURA_URL = "https://mainnet.infura.io/v3/YOUR_INFURA_KEY"  # replace with your key
-web3 = Web3(Web3.HTTPProvider(INFURA_URL))
 
-if web3.is_connected():
-    st.success("✅ Connected to Ethereum Mainnet via Infura")
-else:
-    st.error("❌ Failed to connect to Ethereum")
+try:
+    response = requests.post(INFURA_URL, json={"jsonrpc":"2.0","method":"web3_clientVersion","params":[],"id":1})
+    if response.status_code == 200 and "result" in response.json():
+        st.success("✅ Connected to Ethereum Mainnet via Infura")
+    else:
+        st.error("❌ Failed to connect to Ethereum via Infura")
+        st.stop()
+except Exception as e:
+    st.error(f"❌ Error connecting to Infura: {e}")
     st.stop()
 
 # --------------------------
-# 3. Compound Comet (USDC market)
+# 3. Fetch ETH price from Chainlink via Infura
 # --------------------------
-comet_address = Web3.to_checksum_address("0xc3d688B66703497DAA19211EEdff47f25384cdc3")
-eth_address = Web3.to_checksum_address("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")  # WETH
+CHAINLINK_ETH_USD = "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419"  # ETH/USD aggregator
+LATEST_ROUND_SELECTOR = "0x50d25bcd"  # latestRoundData() function selector (first 4 bytes)
 
-# Comet ABI (simplified)
-comet_abi = json.loads("""
-[
-  {
-    "inputs": [{"internalType":"address","name":"asset","type":"address"}],
-    "name":"getAssetInfoByAddress",
-    "outputs":[
-      {"components":[
-        {"internalType":"uint8","name":"offset","type":"uint8"},
-        {"internalType":"address","name":"asset","type":"address"},
-        {"internalType":"address","name":"priceFeed","type":"address"},
-        {"internalType":"uint64","name":"scale","type":"uint64"},
-        {"internalType":"uint64","name":"borrowCollateralFactor","type":"uint64"},
-        {"internalType":"uint64","name":"liquidateCollateralFactor","type":"uint64"},
-        {"internalType":"uint64","name":"liquidationFactor","type":"uint64"},
-        {"internalType":"uint128","name":"supplyCap","type":"uint128"}
-      ],"internalType":"struct AssetInfo","name":"","type":"tuple"}
-    ],
-    "stateMutability":"view",
-    "type":"function"
-  },
-  {
-    "inputs":[{"internalType":"address","name":"priceFeed","type":"address"}],
-    "name":"getPrice",
-    "outputs":[{"internalType":"uint256","name":"","type":"uint256"}],
-    "stateMutability":"view",
-    "type":"function"
-  }
-]
-""")
+payload = {
+    "jsonrpc": "2.0",
+    "method": "eth_call",
+    "params": [{
+        "to": CHAINLINK_ETH_USD,
+        "data": LATEST_ROUND_SELECTOR
+    }, "latest"],
+    "id": 1
+}
 
-comet = web3.eth.contract(address=comet_address, abi=comet_abi)
+response = requests.post(INFURA_URL, json=payload)
+price_hex = response.json()["result"]
+eth_price = int(price_hex, 16) / 1e8
+
+st.subheader("💰 ETH Price")
+st.success(f"ETH/USDC = ${eth_price:,.2f}")
 
 # --------------------------
-# 4. Get ETH factors + price in USDC
+# 4. Set Collateral Factors manually (replace fetching Comet contract)
 # --------------------------
-asset_info = comet.functions.getAssetInfoByAddress(eth_address).call()
-borrow_cf = asset_info[4] / 1e18
-liquidate_cf = asset_info[5] / 1e18
-liquidation_factor = asset_info[6] / 1e18
+borrow_cf = 0.75  # 75%
+liquidate_cf = 0.8  # 80%
+liquidation_factor = 0.95  # 5% penalty
 
-price_feed_address = asset_info[2]
-eth_price_raw = comet.functions.getPrice(price_feed_address).call()
-eth_price = eth_price_raw / 1e8  # Chainlink oracle returns 8 decimals
-
-st.subheader("📊 ETH Collateral Factors (from Comet)")
+st.subheader("📊 ETH Collateral Factors")
 st.write(f"- Borrow Collateral Factor: {borrow_cf*100:.2f}%")
 st.write(f"- Liquidate Collateral Factor: {liquidate_cf*100:.2f}%")
 st.write(f"- Liquidation Penalty: {(1 - liquidation_factor)*100:.2f}%")
-st.success(f"💰 Current ETH Price (USDC): ${eth_price:,.2f}")
 
 # --------------------------
 # 5. Fetch 1000 APR points from The Graph
@@ -126,7 +107,6 @@ df = pd.DataFrame({
 df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
 df = df.sort_values("timestamp")
 
-# Ensure APRs are decimals
 if df["borrowApr"].mean() > 1:
     df["borrowApr"] /= 100
     df["supplyApr"] /= 100
