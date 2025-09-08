@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 import numpy as np
 import json
-from web3 import web3
+from web3 import Web3
 
 # --------------------------
 # 1. Page setup
