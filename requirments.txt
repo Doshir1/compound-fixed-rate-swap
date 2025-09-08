@@ -2,4 +2,4 @@ streamlit
 requests
 pandas
 numpy
-python -m pip install web3
+web3
