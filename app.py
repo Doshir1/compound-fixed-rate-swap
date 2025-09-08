@@ -1,3 +1,12 @@
+import sys
+import subprocess
+
+try:
+    from web3 import Web3
+except ModuleNotFoundError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "web3==6.6.0"])
+    from web3 import Web3
+
 import streamlit as st
 import pandas as pd
 import numpy as np
