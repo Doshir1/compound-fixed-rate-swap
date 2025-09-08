@@ -1,4 +1,4 @@
-eth-abi
+web3=>6.6.0
 requests
 pandas
 numpy
