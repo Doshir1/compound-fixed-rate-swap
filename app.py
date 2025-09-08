@@ -23,7 +23,7 @@ and checks liquidation risk using real collateral factors.
 # --------------------------
 # 2. Infura connection test
 # --------------------------
-INFURA_URL = "https://mainnet.infura.io/v3/YOUR_INFURA_KEY"  # replace with your key
+INFURA_URL = "https://mainnet.infura.io/v3/dfe34c8812444c0e8f1e4806789f58d6"  # replace with your key
 
 try:
     response = requests.post(INFURA_URL, json={"jsonrpc":"2.0","method":"web3_clientVersion","params":[],"id":1})
