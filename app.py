@@ -18,13 +18,13 @@ and checks liquidation risk using real collateral factors.
 # --------------------------
 # 2. Infura Connection Test
 # --------------------------
-INFURA_URL = "https://mainnet.infura.io/v3/dfe34c8812444c0e8f1e4806789f58d6"  # replace with your project ID
+INFURA_URL = "https://mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID"  # replace with your project ID
 
 try:
     payload = {"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}
     r = requests.post(INFURA_URL, json=payload)
     r_json = r.json()
-    if r.status_code == 200 and "result" in r_json:
+    if "result" in r_json:
         st.success(f"✅ Connected to Ethereum Mainnet (latest block: {int(r_json['result'],16)})")
     else:
         st.error(f"❌ Failed to connect via Infura: {r_json}")
@@ -39,21 +39,32 @@ except Exception as e:
 comet_address = "0xc3d688B66703497DAA19211EEdff47f25384cdc3"
 eth_address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
 
+def call_infura(to_address, data):
+    """Safe eth_call via Infura with error handling"""
+    payload = {"jsonrpc":"2.0","method":"eth_call",
+               "params":[{"to": to_address, "data": data}, "latest"], "id":1}
+    try:
+        r = requests.post(INFURA_URL, json=payload)
+        r_json = r.json()
+        if "result" not in r_json:
+            st.error(f"RPC call failed: {r_json}")
+            st.stop()
+        return r_json["result"]
+    except Exception as e:
+        st.error(f"RPC call exception: {e}")
+        st.stop()
+
 # getAssetInfoByAddress(address) selector: first 4 bytes
 function_selector = "0x59f4e7ff"
-data = function_selector + eth_address[2:].rjust(64, '0')
+eth_address_clean = eth_address.lower().replace("0x","")
+data = function_selector + eth_address_clean.rjust(64,'0')
+result_hex = call_infura(comet_address, data)[2:]  # remove 0x
 
-payload = {"jsonrpc":"2.0","method":"eth_call",
-           "params":[{"to": comet_address, "data": data}, "latest"], "id":1}
-r = requests.post(INFURA_URL, json=payload)
-result_hex = r.json()["result"][2:]  # remove 0x
-
-# Decode relevant slots manually
-# Each uint256 slot = 32 bytes = 64 hex chars
+# Decode relevant slots manually (each slot = 32 bytes = 64 hex chars)
 borrow_cf = int(result_hex[64*4:64*5],16) / 1e18
 liquidate_cf = int(result_hex[64*5:64*6],16) / 1e18
 liquidation_factor = int(result_hex[64*6:64*7],16) / 1e18
-price_feed_address = "0x" + result_hex[64*2+24:64*3]  # last 40 hex chars for address
+price_feed_address = "0x" + result_hex[64*2+24:64*3]  # last 40 hex chars
 
 st.subheader("📊 ETH Collateral Factors (from Comet)")
 st.write(f"- Borrow Collateral Factor: {borrow_cf*100:.2f}%")
@@ -63,14 +74,8 @@ st.write(f"- Liquidation Penalty: {(1 - liquidation_factor)*100:.2f}%")
 # --------------------------
 # 4. Fetch ETH/USD Price from Chainlink via Comet
 # --------------------------
-# latestRoundData() selector
-function_selector_price = "0x50d25bcd"
-payload = {"jsonrpc":"2.0","method":"eth_call",
-           "params":[{"to": price_feed_address, "data": function_selector_price}, "latest"], "id":1}
-r = requests.post(INFURA_URL, json=payload)
-result_hex = r.json()["result"][2:]
-
-# answer = 2nd 32-byte slot
+function_selector_price = "0x50d25bcd"  # latestRoundData()
+result_hex = call_infura(price_feed_address, function_selector_price)[2:]
 answer = int(result_hex[64:64*2],16)
 eth_price = answer / 1e8
 st.success(f"💰 Current ETH Price (USDC): ${eth_price:,.2f}")
