@@ -1,5 +1,4 @@
-streamlit
+web3==6.20.1
+requests
 pandas
 numpy
-requests
-web3==6.11.3
