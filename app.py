@@ -1,17 +1,6 @@
-import os
-import subprocess
-
-try:
-    from web3 import Web3
-except ImportError:
-    subprocess.check_call([os.sys.executable, "-m", "pip", "install", "web3"])
-    from web3 import Web3
-
 import streamlit as st
 import requests
 import pandas as pd
-import numpy as np
-from web3 import Web3
 import json
 
 # --------------------------
