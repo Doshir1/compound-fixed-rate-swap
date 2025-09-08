@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 import json
-import web3
+from web3 import Web3
 
 # --------------------------
 # 1. Page setup
