@@ -1,4 +1,4 @@
-python -m pip install web3
+
 import streamlit as st
 import requests
 import pandas as pd
