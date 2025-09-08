@@ -18,7 +18,7 @@ and checks liquidation risk using real collateral factors.
 # --------------------------
 # 2. Infura Connection Test
 # --------------------------
-INFURA_URL = "https://mainnet.infura.io/v3/YOUR_INFURA_PROJECT_ID"  # replace with your project ID
+INFURA_URL = "https://mainnet.infura.io/v3/dfe34c8812444c0e8f1e4806789f58d6"  # replace with your project ID
 
 try:
     payload = {"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}
