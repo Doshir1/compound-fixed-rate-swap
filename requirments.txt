@@ -2,4 +2,4 @@ streamlit
 pandas
 numpy
 requests
-web3
+web3==6.11.3
