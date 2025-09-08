@@ -1,12 +1,9 @@
-source /home/adminuser/venv/bin/activate   # activate your virtual environment
-pip install web3
-
 import streamlit as st
 import requests
 import pandas as pd
 import numpy as np
 import json
-from web3 import Web3
+from web3 import web3
 
 # --------------------------
 # 1. Page setup
