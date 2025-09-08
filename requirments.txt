@@ -1,5 +1,5 @@
-streamlit
+eth-abi
 requests
 pandas
 numpy
-web3
+streamlit
