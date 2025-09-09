@@ -7,41 +7,37 @@ import numpy as np
 # 1. Page setup
 # --------------------------
 st.title("Compound Fixed Rate Swap Simulator — Daily Floating Rates")
-st.write("""
-Fetches historical APRs, runs a backtest to predict future floating rates that vary daily,
-automatically sets a fixed rate higher than the floating rates, simulates daily cashflows,
-and checks for liquidation risk.
-""")
 
 # --------------------------
-# 2. Collateral factors (hardcoded)
+# 2. Hardcoded collateral factors
 # --------------------------
 BORROW_CF = 0.825
 LIQUIDATE_CF = 0.88
 LIQUIDATION_PENALTY = 0.07
 
 # --------------------------
-# 3. Fetch ETH price from Infura
+# 3. Fetch ETH price via Infura
 # --------------------------
-INFURA_URL = "https://mainnet.infura.io/v3/dfe34c8812444c0e8f1e4806789f58d6"
+INFURA_URL = "https://mainnet.infura.io/v3/your_infura_project_id"
 
-@st.cache_data(ttl=300)
 def get_eth_price_usd():
-    url = "https://api.coinbase.com/v2/prices/ETH-USD/spot"
-    r = requests.get(url, timeout=10)
-    r.raise_for_status()
-    data = r.json()
-    return float(data["data"]["amount"])
+    try:
+        url = "https://api.coinbase.com/v2/prices/ETH-USD/spot"
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        return float(r.json()["data"]["amount"])
+    except Exception:
+        return None
 
-try:
-    eth_price = get_eth_price_usd()
+eth_price = get_eth_price_usd()
+if eth_price:
     st.success(f"💰 Current ETH Price (USD): ${eth_price:,.2f}")
-except Exception:
-    st.error("Failed to fetch ETH price from Infura/Coinbase.")
+else:
+    st.error("Failed to fetch ETH price.")
     eth_price = st.number_input("Enter ETH Price manually (USD)", min_value=500.0, value=2000.0, step=10.0)
 
 # --------------------------
-# 4. Fetch 1000 APR points (newest first)
+# 4. Fetch 1000 APR points
 # --------------------------
 api_key = "3b6cc500833cb7c07f3eb2e97bc88709"
 url = f"https://gateway.thegraph.com/api/{api_key}/subgraphs/id/5nwMCSHaTqG3Kd2gHznbTXEnZ9QNWsssQfbHhDqQSQFp"
@@ -49,7 +45,7 @@ headers = {"Content-Type": "application/json"}
 
 query = """
 {
-  dailyMarketAccountings(first: 1000, where: { market: "0xc3d688B66703497DAA19211EEdff47f25384cdc3" }, orderBy: timestamp, orderDirection: desc) {
+  dailyMarketAccountings(first: 1000, where: { market: "0xc3d688B66703497DAA19211EEdff47f25384cdc3" }, orderBy: timestamp, orderDirection: asc) {
     timestamp
     accounting {
       borrowApr
@@ -62,6 +58,7 @@ query = """
 response = requests.post(url, json={"query": query}, headers=headers)
 data = response.json()
 
+# Construct dataframe
 df = pd.DataFrame({
     "timestamp": [entry["timestamp"] for entry in data["data"]["dailyMarketAccountings"]],
     "borrowApr": [float(entry["accounting"]["borrowApr"]) for entry in data["data"]["dailyMarketAccountings"]],
@@ -69,25 +66,21 @@ df = pd.DataFrame({
 })
 
 df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
+df = df.sort_values("timestamp")
 
-# Keep newest → oldest
-df = df.sort_values("timestamp", ascending=False)
-
-# Convert to decimals if necessary
 if df["borrowApr"].mean() > 1:
     df["borrowApr"] /= 100
     df["supplyApr"] /= 100
 
 # --------------------------
-# 5. Display most recent 10 APRs (corrected)
+# 5. Show 10 most recent APRs
 # --------------------------
+df_last10 = df.tail(10).sort_values("timestamp", ascending=False)
 st.subheader("📊 Most Recent 10 APRs")
-df_last10 = df.head(10).reset_index(drop=True)
-st.dataframe(df_last10[["timestamp", "borrowApr", "supplyApr"]])
+st.dataframe(df_last10[["timestamp", "borrowApr", "supplyApr"]].reset_index(drop=True))
 
-# Chart should still show historical data
 st.subheader("📈 Historical APR Chart (Full 1000 Days)")
-st.line_chart(df.sort_values("timestamp", ascending=True).set_index("timestamp")[["borrowApr", "supplyApr"]])
+st.line_chart(df.set_index("timestamp")[ ["borrowApr", "supplyApr"] ])
 
 # --------------------------
 # 6. Swap Simulator Inputs
@@ -108,31 +101,59 @@ st.write(f"📉 Max Borrow Capacity: ${max_borrow_usd:,.2f}")
 st.write(f"⚠️ Liquidation Threshold: ${liquidation_threshold:,.2f}")
 
 # --------------------------
-# 8. Use most recent floating rates (not forecast)
+# 8. Backtest-derived Fixed Rate Selection
 # --------------------------
-st.subheader("📑 Floating & Fixed Rates (Recent Data)")
+def backtest_for_fixed_rate(df, max_borrow_usd, liquidation_threshold, horizon):
+    safety_buffer = max_borrow_usd - liquidation_threshold
 
-# Take the most recent N borrow APRs
-historical_floating_rates = (
-    df.sort_values("timestamp", ascending=False)
-      .head(simulation_days)["borrowApr"]
-      .iloc[::-1]  # reverse to chronological order
-      .values
-)
+    # Candidate floating rates (borrow APRs)
+    series = df.tail(horizon)["borrowApr"].values
 
-# Fixed rate = max of those borrow APRs + small margin
-fixed_rate_annual = historical_floating_rates.max() + 0.0005
+    # Daily floating rates
+    floating_daily = (1 + series) ** (1/365) - 1
+
+    # Binary search fixed rate
+    lo, hi = 0.0, 0.5  # 0% to 50%
+    best_rate = lo
+
+    for _ in range(40):  # 40 iterations ~ 1e-12 precision
+        mid = (lo + hi) / 2
+        fixed_daily = (1 + mid) ** (1/365) - 1
+
+        cum_net = 0.0
+        safe = True
+
+        for r in floating_daily:
+            floating_payment = max_borrow_usd * r
+            fixed_payment = max_borrow_usd * fixed_daily
+            net = fixed_payment - floating_payment
+            cum_net += net
+
+            if cum_net < -safety_buffer:
+                safe = False
+                break
+
+        if safe:
+            best_rate = mid
+            lo = mid
+        else:
+            hi = mid
+
+    return best_rate
+
+fixed_rate_annual = backtest_for_fixed_rate(df, max_borrow_usd, liquidation_threshold, simulation_days)
 fixed_rate_daily = (1 + fixed_rate_annual) ** (1/365) - 1
 
-# Convert floating APRs to daily rates
-floating_rates_daily = (1 + historical_floating_rates) ** (1/365) - 1
-
+st.subheader("🔮 Fixed Rate Determination")
 st.write(f"📈 Fixed Rate (annual): {fixed_rate_annual*100:.2f}%")
 st.write(f"➡️ Daily Fixed Rate: {fixed_rate_daily*100:.4f}%")
 
 # --------------------------
 # 9. Daily Cashflow Simulation
 # --------------------------
+recent_floating = df.tail(simulation_days)["borrowApr"].values
+floating_rates_daily = (1 + recent_floating) ** (1/365) - 1
+
 results = []
 cumulative_net = 0.0
 liquidated_day = None
@@ -150,7 +171,7 @@ for i in range(simulation_days):
 
     results.append({
         "Day": i + 1,
-        "Floating APR (annual %)": f"{historical_floating_rates[i]*100:.4f}",
+        "Floating APR (annual %)": f"{recent_floating[i]*100:.4f}",
         "Floating Payment (USD)": floating_payment,
         "Fixed Payment (USD)": fixed_payment,
         "Net Cashflow (USD)": net,
@@ -158,8 +179,9 @@ for i in range(simulation_days):
     })
 
 results_df = pd.DataFrame(results)
+st.subheader("📑 Daily Cashflows & Cumulative Net")
 st.dataframe(results_df)
-st.line_chart(results_df.set_index("Day")[["Floating Payment (USD)", "Fixed Payment (USD)"]])
+st.line_chart(results_df.set_index("Day")[ ["Floating Payment (USD)", "Fixed Payment (USD)"] ])
 
 # --------------------------
 # 10. Final Liquidation Check
