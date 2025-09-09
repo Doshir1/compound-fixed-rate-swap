@@ -94,7 +94,7 @@ st.line_chart(df.sort_values("timestamp", ascending=True).set_index("timestamp")
 # --------------------------
 st.subheader("💡 Swap Simulator Settings")
 eth_collateral = st.number_input("Deposit ETH as Collateral", min_value=1.0, value=10.0, step=0.5)
-simulation_days = st.slider("Simulation Period (Days)", 1, 90, 30)
+simulation_days = st.slider("Simulation Period (Days)", 1, 1000, 30)
 
 # --------------------------
 # 7. Borrow capacity and liquidation
@@ -106,33 +106,21 @@ liquidation_threshold = collateral_value_usd * LIQUIDATE_CF
 st.write(f"🔒 Collateral Value: ${collateral_value_usd:,.2f}")
 st.write(f"📉 Max Borrow Capacity: ${max_borrow_usd:,.2f}")
 st.write(f"⚠️ Liquidation Threshold: ${liquidation_threshold:,.2f}")
-st.write(f"💀 Liquidation Penalty: {LIQUIDATION_PENALTY*100:.2f}%")
 
 # --------------------------
-# 8. Backtest & Forecast Floating Rates
+# 8. Use historical floating rates (not forecast)
 # --------------------------
-st.subheader("🔮 Backtest for Floating & Fixed Rates")
+st.subheader("📑 Floating & Fixed Rates (Historical)")
 
-def ar1_forecast_varying(series: pd.Series, n_days: int):
-    mu = series.mean()
-    phi = 0.8  # moderate autocorrelation
-    last = series.iloc[-1]
-    forecasts = []
-    cur = last
-    rng = np.random.default_rng(seed=42)
-    for _ in range(n_days):
-        shock = rng.normal(scale=0.002)
-        nxt = mu + phi * (cur - mu) + shock
-        nxt = max(nxt, 0.0)
-        forecasts.append(nxt)
-        cur = nxt
-    return np.array(forecasts)
+# Take last N days of historical borrow APRs
+historical_floating_rates = df["borrowApr"].tail(simulation_days).values
 
-predicted_floating_rates = ar1_forecast_varying(df["borrowApr"], simulation_days)
-
-fixed_rate_annual = predicted_floating_rates.max() + 0.0005
+# Fixed rate = max of those borrow APRs + small margin
+fixed_rate_annual = historical_floating_rates.max() + 0.0005
 fixed_rate_daily = (1 + fixed_rate_annual) ** (1/365) - 1
-floating_rates_daily = (1 + predicted_floating_rates) ** (1/365) - 1
+
+# Convert floating APRs to daily rates
+floating_rates_daily = (1 + historical_floating_rates) ** (1/365) - 1
 
 st.write(f"📈 Fixed Rate (annual): {fixed_rate_annual*100:.2f}%")
 st.write(f"➡️ Daily Fixed Rate: {fixed_rate_daily*100:.4f}%")
@@ -140,8 +128,6 @@ st.write(f"➡️ Daily Fixed Rate: {fixed_rate_daily*100:.4f}%")
 # --------------------------
 # 9. Daily Cashflow Simulation
 # --------------------------
-st.subheader("📑 Daily Cashflows & Cumulative Net")
-
 results = []
 cumulative_net = 0.0
 liquidated_day = None
@@ -159,7 +145,7 @@ for i in range(simulation_days):
 
     results.append({
         "Day": i + 1,
-        "Floating APR (annual %)": f"{predicted_floating_rates[i]*100:.4f}",
+        "Floating APR (annual %)": f"{historical_floating_rates[i]*100:.4f}",
         "Floating Payment (USD)": floating_payment,
         "Fixed Payment (USD)": fixed_payment,
         "Net Cashflow (USD)": net,
