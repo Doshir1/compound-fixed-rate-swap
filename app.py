@@ -41,7 +41,7 @@ except Exception:
     eth_price = st.number_input("Enter ETH Price manually (USD)", min_value=500.0, value=2000.0, step=10.0)
 
 # --------------------------
-# 4. Fetch 1000 APR points
+# 4. Fetch 1000 APR points (newest first)
 # --------------------------
 api_key = "3b6cc500833cb7c07f3eb2e97bc88709"
 url = f"https://gateway.thegraph.com/api/{api_key}/subgraphs/id/5nwMCSHaTqG3Kd2gHznbTXEnZ9QNWsssQfbHhDqQSQFp"
@@ -49,7 +49,7 @@ headers = {"Content-Type": "application/json"}
 
 query = """
 {
-  dailyMarketAccountings(first: 1000, where: { market: "0xc3d688B66703497DAA19211EEdff47f25384cdc3" }, orderBy: timestamp, orderDirection: asc) {
+  dailyMarketAccountings(first: 1000, where: { market: "0xc3d688B66703497DAA19211EEdff47f25384cdc3" }, orderBy: timestamp, orderDirection: desc) {
     timestamp
     accounting {
       borrowApr
@@ -69,7 +69,9 @@ df = pd.DataFrame({
 })
 
 df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
-df = df.sort_values("timestamp")  # Oldest → newest
+
+# Keep newest → oldest
+df = df.sort_values("timestamp", ascending=False)
 
 # Convert to decimals if necessary
 if df["borrowApr"].mean() > 1:
@@ -77,14 +79,15 @@ if df["borrowApr"].mean() > 1:
     df["supplyApr"] /= 100
 
 # --------------------------
-# 5. Display most recent 10 APRs (FIXED)
+# 5. Display most recent 10 APRs (corrected)
 # --------------------------
 st.subheader("📊 Most Recent 10 APRs")
-df_last10 = df.sort_values("timestamp", ascending=False).head(10).reset_index(drop=True)
+df_last10 = df.head(10).reset_index(drop=True)
 st.dataframe(df_last10[["timestamp", "borrowApr", "supplyApr"]])
 
+# Chart should still show historical data
 st.subheader("📈 Historical APR Chart (Full 1000 Days)")
-st.line_chart(df.set_index("timestamp")[["borrowApr", "supplyApr"]])
+st.line_chart(df.sort_values("timestamp", ascending=True).set_index("timestamp")[["borrowApr", "supplyApr"]])
 
 # --------------------------
 # 6. Swap Simulator Inputs
