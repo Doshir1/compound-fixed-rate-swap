@@ -24,7 +24,7 @@ LIQ_PENALTY = 0.07
 # --------------------------
 # 3. ETH price via Infura + Chainlink oracle
 # --------------------------
-INFURA_PROJECT_ID = "YOUR_INFURA_PROJECT_ID"  # 🔑 replace with your Infura project ID
+INFURA_PROJECT_ID = "dfe34c8812444c0e8f1e4806789f58d6"  # 🔑 replace with your Infura project ID
 INFURA_URL = f"https://mainnet.infura.io/v3/{INFURA_PROJECT_ID}"
 
 CHAINLINK_ETH_USD = "0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419"  # ETH/USD aggregator
