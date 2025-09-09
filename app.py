@@ -108,12 +108,17 @@ st.write(f"📉 Max Borrow Capacity: ${max_borrow_usd:,.2f}")
 st.write(f"⚠️ Liquidation Threshold: ${liquidation_threshold:,.2f}")
 
 # --------------------------
-# 8. Use historical floating rates (not forecast)
+# 8. Use most recent floating rates (not forecast)
 # --------------------------
-st.subheader("📑 Floating & Fixed Rates (Historical)")
+st.subheader("📑 Floating & Fixed Rates (Recent Data)")
 
-# Take last N days of historical borrow APRs
-historical_floating_rates = df["borrowApr"].tail(simulation_days).values
+# Take the most recent N borrow APRs
+historical_floating_rates = (
+    df.sort_values("timestamp", ascending=False)
+      .head(simulation_days)["borrowApr"]
+      .iloc[::-1]  # reverse to chronological order
+      .values
+)
 
 # Fixed rate = max of those borrow APRs + small margin
 fixed_rate_annual = historical_floating_rates.max() + 0.0005
