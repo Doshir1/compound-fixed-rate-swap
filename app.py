@@ -101,22 +101,14 @@ if df["borrowApr"].mean() > 1:
     df["borrowApr"] /= 100
     df["supplyApr"] /= 100
 
+# 5. Display most recent 10 APRs (FIXED)
 # --------------------------
-# 5. Display most recent 10 APRs
-# --------------------------
-today = pd.Timestamp.today().normalize()
-last_10_days = today - pd.to_timedelta(np.arange(10), unit='d')
-df["date_only"] = df["timestamp"].dt.normalize()
-df_last10 = df[df["date_only"].isin(last_10_days)]
-if len(df_last10) < 10:
-    df_last10 = df.tail(10)
-df_last10 = df_last10.sort_values("timestamp", ascending=False)
+st.subheader("📊 Most Recent 10 APRs")
 
-st.subheader("📊 Most Recent 10 APRs (Last 10 Days)")
-st.dataframe(df_last10[["timestamp", "borrowApr", "supplyApr"]].reset_index(drop=True))
+df_last10 = df.sort_values("timestamp", ascending=False).head(10)  # take 10 most recent rows
+df_last10 = df_last10.reset_index(drop=True)
 
-st.subheader("📈 Historical APR Chart (1000 Days)")
-st.line_chart(df.set_index("timestamp")[["borrowApr", "supplyApr"]])
+st.dataframe(df_last10[["timestamp", "borrowApr", "supplyApr"]])
 
 # --------------------------
 # 6. Swap Simulator Inputs
